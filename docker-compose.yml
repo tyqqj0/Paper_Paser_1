@@ -1,0 +1,163 @@
+services:
+  api: &main_app
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    image: literature_parser_backend:${LITERATURE_PARSER_BACKEND_VERSION:-latest}
+    restart: always
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      LITERATURE_PARSER_BACKEND_HOST: 0.0.0.0
+      LITERATURE_PARSER_BACKEND_DB_HOST: literature_parser_backend-db
+      LITERATURE_PARSER_BACKEND_DB_PORT: 27017
+      LITERATURE_PARSER_BACKEND_DB_USER: literature_parser_backend
+      LITERATURE_PARSER_BACKEND_DB_PASS: literature_parser_backend
+      LITERATURE_PARSER_BACKEND_DB_BASE: admin
+      # Redis configuration
+      REDIS_URL: redis://redis:6379/0
+      # External services
+      GROBID_URL: http://grobid:8070
+      CROSSREF_EMAIL: literature-parser@example.com
+      # Celery configuration
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    networks:
+      - literature_parser_network
+    ports:
+      - "8000:8000"
+
+  worker:
+    <<: *main_app
+    command: poetry run celery -A literature_parser_backend.worker.celery_app worker --loglevel=info --concurrency=2 --queues=literature
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      grobid:
+        condition: service_started
+    ports: []  # Worker doesn't need exposed ports
+    environment:
+      LITERATURE_PARSER_BACKEND_HOST: 0.0.0.0
+      LITERATURE_PARSER_BACKEND_DB_HOST: literature_parser_backend-db
+      LITERATURE_PARSER_BACKEND_DB_PORT: 27017
+      LITERATURE_PARSER_BACKEND_DB_USER: literature_parser_backend
+      LITERATURE_PARSER_BACKEND_DB_PASS: literature_parser_backend
+      LITERATURE_PARSER_BACKEND_DB_BASE: admin
+      # Redis configuration
+      REDIS_URL: redis://redis:6379/0
+      # External services
+      GROBID_URL: http://grobid:8070
+      CROSSREF_EMAIL: literature-parser@example.com
+      # Celery configuration
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    networks:
+      - literature_parser_network
+
+  db:
+    image: mongo:7.0
+    hostname: literature_parser_backend-db
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: "literature_parser_backend"
+      MONGO_INITDB_ROOT_PASSWORD: "literature_parser_backend"
+    command: "mongod"
+    volumes:
+      - literature_parser_backend-db-data:/data/db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 40
+    networks:
+      - literature_parser_network
+    ports:
+      - "27017:27017"
+
+  redis:
+    image: redis:7-alpine
+    hostname: literature_parser_backend-redis
+    restart: always
+    command: redis-server --appendonly yes
+    volumes:
+      - literature_parser_backend-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - literature_parser_network
+    ports:
+      - "6379:6379"
+
+  grobid:
+    image: lfoppiano/grobid:0.8.2
+    hostname: literature_parser_backend-grobid
+    restart: always
+    environment:
+      JAVA_OPTS: "-Xmx2g"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8070/api/isalive"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - literature_parser_network
+    ports:
+      - "8070:8070"
+
+  # Optional: Redis Commander for Redis management (development only)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    hostname: literature_parser_backend-redis-commander
+    restart: always
+    environment:
+      REDIS_HOSTS: redis:redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - literature_parser_network
+    ports:
+      - "8081:8081"
+    profiles:
+      - dev
+
+  # Optional: Mongo Express for MongoDB management (development only)
+  mongo-express:
+    image: mongo-express:latest
+    hostname: literature_parser_backend-mongo-express
+    restart: always
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: literature_parser_backend
+      ME_CONFIG_MONGODB_ADMINPASSWORD: literature_parser_backend
+      ME_CONFIG_MONGODB_URL: mongodb://literature_parser_backend:literature_parser_backend@literature_parser_backend-db:27017/
+      ME_CONFIG_BASICAUTH: false
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - literature_parser_network
+    ports:
+      - "8082:8081"
+    profiles:
+      - dev
+
+networks:
+  literature_parser_network:
+    driver: bridge
+
+volumes:
+  literature_parser_backend-db-data:
+    name: literature_parser_backend-db-data
+  literature_parser_backend-redis-data:
+    name: literature_parser_backend-redis-data
