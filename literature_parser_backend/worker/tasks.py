@@ -9,18 +9,14 @@ import hashlib
 import logging
 import re
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Tuple
 
 import pymongo
 from celery import current_task
 
 from ..models import (
-    AuthorModel,
-    ContentModel,
     IdentifiersModel,
     LiteratureModel,
-    MetadataModel,
-    ReferenceModel,
     TaskInfoModel,
 )
 from ..settings import Settings
@@ -40,7 +36,7 @@ def _save_literature_sync(literature: LiteratureModel, settings: Settings) -> st
     Returns:
         str: The created literature ID
     """
-    mongo_url = f"mongodb://{settings.db_user}:{settings.db_pass}@{settings.db_host}:{settings.db_port}/admin"
+    mongo_url = f"mongodb://{settings.db_user}:{settings.db_pass}@{settings.db_host}:{settings.db_port}/{settings.db_base}"
     client = pymongo.MongoClient(mongo_url)
     db = client[settings.db_base]
     collection = db.literatures
@@ -136,13 +132,13 @@ def _process_literature(task_id: str, source: Dict[str, Any]) -> str:
         update_task_status("正在提取标识符", 10)
         identifiers, primary_type = extract_authoritative_identifiers(source)
         logger.info(
-            f"提取到标识符: {identifiers.model_dump_json(exclude_none=True)} (主要类型: {primary_type})"
+            f"提取到标识符: {identifiers.model_dump_json(exclude_none=True)} (主要类型: {primary_type})",
         )
         if not any([identifiers.doi, identifiers.arxiv_id, identifiers.fingerprint]):
             raise ValueError("无法提取任何有效标识符，任务终止。")
 
-            # Lazily import fetchers to avoid circular dependencies and scope them locally.
-            from .content_fetcher import ContentFetcher
+        # Lazily import fetchers to avoid circular dependencies and scope them locally.
+        from .content_fetcher import ContentFetcher
         from .metadata_fetcher import MetadataFetcher
         from .references_fetcher import ReferencesFetcher
 
@@ -162,7 +158,7 @@ def _process_literature(task_id: str, source: Dict[str, Any]) -> str:
         # This is a prime candidate for parallel execution (e.g., using a thread pool).
         update_task_status("正在获取元数据", 40, f"使用 {primary_type} 标识符")
         metadata, metadata_raw_data = metadata_fetcher.fetch_metadata_waterfall(
-            identifiers, primary_type, source
+            identifiers, primary_type, source,
         )
         if not metadata:
             raise ValueError("所有元数据源均失败，无法处理文献。")
@@ -172,7 +168,7 @@ def _process_literature(task_id: str, source: Dict[str, Any]) -> str:
         # Also a candidate for parallel execution.
         update_task_status("正在获取参考文献", 65)
         references, references_raw_data = references_fetcher.fetch_references_waterfall(
-            identifiers, primary_type, pdf_content
+            identifiers, primary_type, pdf_content,
         )
         logger.info(f"成功获取 {len(references)} 条参考文献")
 
@@ -231,6 +227,6 @@ def process_literature_task(self, source: Dict[str, Any]) -> str:
     except Exception as e:
         logger.exception(f"任务 {task_id} 执行失败: {e}", exc_info=True)
         self.update_state(
-            state="FAILURE", meta={"exc_type": type(e).__name__, "exc_message": str(e)}
+            state="FAILURE", meta={"exc_type": type(e).__name__, "exc_message": str(e)},
         )
         raise
