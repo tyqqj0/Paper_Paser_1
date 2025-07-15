@@ -113,9 +113,11 @@ async def get_literature_summary(literature_id: str) -> LiteratureSummaryDTO:
 
         # 转换为摘要DTO
         summary = LiteratureSummaryDTO(
-            id=literature.id,
+            id=str(literature.id),
             identifiers=literature.identifiers,
             metadata=literature.metadata,
+            content=literature.content.model_dump() if literature.content else {},
+            references=literature.references,
             task_info=literature.task_info,
             created_at=literature.created_at,
             updated_at=literature.updated_at,
@@ -157,7 +159,7 @@ async def get_literature_fulltext(literature_id: str) -> LiteratureFulltextDTO:
 
         # 转换为完整内容DTO
         fulltext = LiteratureFulltextDTO(
-            id=literature.id,
+            id=str(literature.id),
             identifiers=literature.identifiers,
             metadata=literature.metadata,
             content=literature.content,

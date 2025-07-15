@@ -33,7 +33,7 @@ class LiteratureDAO:
         """
         try:
             # Convert to dict and handle ObjectId
-            doc_data = literature.model_dump(by_alias=True)
+            doc_data = literature.model_dump(by_alias=True, exclude={"id"})
 
             # Ensure created_at and updated_at are set
             now = datetime.now()
