@@ -163,7 +163,7 @@ class LiteratureModel(BaseModel):
     identifiers: IdentifiersModel = Field(..., description="Authoritative identifiers")
     metadata: MetadataModel = Field(..., description="Literature metadata")
     content: ContentModel = Field(
-        default_factory=ContentModel,
+        default_factory=lambda: ContentModel(),
         description="Content and parsing data",
     )
     references: List[ReferenceModel] = Field(
@@ -330,77 +330,99 @@ class LiteratureSummaryDTO(BaseModel):
     task_info: Optional["TaskInfoModel"] = Field(None, description="Task information")
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
-    
+
     # 便利字段 - 从metadata中提取的信息，便于前端使用
     title: Optional[str] = Field(None, description="Literature title (from metadata)")
-    authors: List[str] = Field(default_factory=list, description="Author names (from metadata)")
+    authors: List[str] = Field(
+        default_factory=list,
+        description="Author names (from metadata)",
+    )
     year: Optional[int] = Field(None, description="Publication year (from metadata)")
     journal: Optional[str] = Field(None, description="Journal name (from metadata)")
     doi: Optional[str] = Field(None, description="DOI (from identifiers)")
 
-    def model_post_init(self, __context) -> None:
+    def model_post_init(self, __context: Any) -> None:
         """Pydantic v2 post-init hook to populate convenience fields"""
         self._populate_convenience_fields()
 
-    def _populate_convenience_fields(self):
+    def _populate_convenience_fields(self) -> None:
         """从metadata和identifiers中提取信息到便利字段"""
         # 从identifiers提取DOI
         if self.identifiers:
-            identifiers_dict = self.identifiers.model_dump() if hasattr(self.identifiers, 'model_dump') else self.identifiers
-            if identifiers_dict.get('doi'):
-                self.doi = identifiers_dict['doi']
+            if hasattr(self.identifiers, "model_dump"):
+                identifiers_dict = self.identifiers.model_dump()
+            else:
+                identifiers_dict = self.identifiers
             
+            if isinstance(identifiers_dict, dict) and identifiers_dict.get("doi"):
+                self.doi = identifiers_dict["doi"]
+
         # 从metadata提取信息
         if self.metadata:
-            metadata_dict = self.metadata.model_dump() if hasattr(self.metadata, 'model_dump') else self.metadata
-            
+            if hasattr(self.metadata, "model_dump"):
+                metadata_dict = self.metadata.model_dump()
+            else:
+                metadata_dict = self.metadata
+
             # 尝试不同来源的元数据
-            sources = ['crossref', 'semantic_scholar', 'grobid']
-            
+            sources = ["crossref", "semantic_scholar", "grobid"]
+
             for source in sources:
-                source_data = metadata_dict.get(source, {})
+                if isinstance(metadata_dict, dict):
+                    source_data = metadata_dict.get(source, {})
                 if source_data and isinstance(source_data, dict):
                     # 提取标题
-                    if not self.title and source_data.get('title'):
-                        self.title = source_data['title']
-                    
+                    if not self.title and source_data.get("title"):
+                        self.title = source_data["title"]
+
                     # 提取年份
                     if not self.year:
-                        year_val = source_data.get('year') or source_data.get('published-online', {}).get('date-parts', [[None]])[0][0]
+                        year_val = (
+                            source_data.get("year")
+                            or source_data.get("published-online", {}).get(
+                                "date-parts",
+                                [[None]],
+                            )[0][0]
+                        )
                         if year_val:
                             try:
                                 self.year = int(year_val)
                             except (ValueError, TypeError):
                                 pass
-                    
+
                     # 提取期刊
                     if not self.journal:
                         self.journal = (
-                            source_data.get('journal') or 
-                            source_data.get('venue') or
-                            source_data.get('container-title', [None])[0] if isinstance(source_data.get('container-title'), list) else source_data.get('container-title')
+                            source_data.get("journal")
+                            or source_data.get("venue")
+                            or source_data.get("container-title", [None])[0]
+                            if isinstance(source_data.get("container-title"), list)
+                            else source_data.get("container-title")
                         )
-                    
+
                     # 提取作者
                     if not self.authors:
-                        authors_data = source_data.get('authors', []) or source_data.get('author', [])
+                        authors_data = source_data.get(
+                            "authors",
+                            [],
+                        ) or source_data.get("author", [])
                         if authors_data:
                             author_names = []
                             for author in authors_data:
                                 if isinstance(author, dict):
                                     # 不同格式的作者数据
                                     name = (
-                                        author.get('name') or
-                                        author.get('full_name') or  
-                                        f"{author.get('given', '')} {author.get('family', '')}".strip() or
-                                        author.get('given') or
-                                        author.get('family')
+                                        author.get("name")
+                                        or author.get("full_name")
+                                        or f"{author.get('given', '')} {author.get('family', '')}".strip()
+                                        or author.get("given")
+                                        or author.get("family")
                                     )
                                     if name:
                                         author_names.append(name)
                                 elif isinstance(author, str):
                                     author_names.append(author)
-                            
+
                             if author_names:
                                 self.authors = author_names
 
@@ -479,8 +501,13 @@ def literature_to_summary_dto(literature: LiteratureModel) -> LiteratureSummaryD
         metadata=literature.metadata,
         content=content_dict,
         references=literature.references,
+        task_info=literature.task_info,
         created_at=literature.created_at,
         updated_at=literature.updated_at,
+        title=literature.title,
+        year=literature.year,
+        journal=literature.journal,
+        doi=literature.doi,
     )
 
 

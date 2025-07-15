@@ -3,9 +3,9 @@
 测试真实URL的脚本 - ArXiv论文
 """
 
-import requests
-import json
 import time
+
+import requests
 
 
 def test_arxiv_url():
@@ -22,7 +22,9 @@ def test_arxiv_url():
         # 1. 提交文献处理请求
         print("1️⃣ 提交文献处理请求...")
         response = requests.post(
-            "http://localhost:8000/api/literature", json=test_data, timeout=30
+            "http://localhost:8000/api/literature",
+            json=test_data,
+            timeout=30,
         )
 
         print(f"   状态码: {response.status_code}")
@@ -65,7 +67,8 @@ def monitor_task(task_id, max_wait_time=300):
     while time.time() - start_time < max_wait_time:
         try:
             response = requests.get(
-                f"http://localhost:8000/api/task/{task_id}", timeout=10
+                f"http://localhost:8000/api/task/{task_id}",
+                timeout=10,
             )
 
             if response.status_code == 200:
@@ -87,7 +90,7 @@ def monitor_task(task_id, max_wait_time=300):
                     return None
 
                 elif status in ["pending", "processing"]:
-                    print(f"   ⏳ 任务进行中...")
+                    print("   ⏳ 任务进行中...")
                     time.sleep(5)  # 等待5秒后再次检查
 
             else:
@@ -105,13 +108,14 @@ def monitor_task(task_id, max_wait_time=300):
 def get_literature_info(literature_id):
     """获取文献详细信息"""
     if not literature_id:
-        return
+        return None
 
     print(f"\n3️⃣ 获取文献详细信息 (ID: {literature_id})")
 
     try:
         response = requests.get(
-            f"http://localhost:8000/api/literature/{literature_id}", timeout=10
+            f"http://localhost:8000/api/literature/{literature_id}",
+            timeout=10,
         )
 
         if response.status_code == 200:
@@ -122,7 +126,7 @@ def get_literature_info(literature_id):
             metadata = result.get("metadata", {})
             print(f"   📰 标题: {metadata.get('title', '未知')}")
             print(
-                f"   👥 作者: {', '.join([a.get('full_name', '') for a in metadata.get('authors', [])])}"
+                f"   👥 作者: {', '.join([a.get('full_name', '') for a in metadata.get('authors', [])])}",
             )
             print(f"   📅 年份: {metadata.get('year', '未知')}")
             print(f"   📖 期刊: {metadata.get('journal', '未知')}")

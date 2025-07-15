@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 import asyncio
+
 from literature_parser_backend.services.semantic_scholar import SemanticScholarClient
+
 
 async def test():
     client = SemanticScholarClient()
     print("Testing Semantic Scholar API client...")
-    
+
     # Test 1: Get metadata by DOI
     print("\n1. Testing DOI lookup...")
     try:
@@ -24,7 +26,7 @@ async def test():
     except Exception as e:
         print(f"ERROR: {e}")
         return False
-    
+
     # Test 2: Get metadata by ArXiv ID
     print("\n2. Testing ArXiv ID lookup...")
     try:
@@ -38,7 +40,7 @@ async def test():
             print("WARNING: No ArXiv metadata found")
     except Exception as e:
         print(f"ERROR: {e}")
-    
+
     # Test 3: Get references
     print("\n3. Testing references lookup...")
     try:
@@ -48,9 +50,10 @@ async def test():
             print(f"  {i}. {ref.get('title', 'N/A')} ({ref.get('year', 'N/A')})")
     except Exception as e:
         print(f"ERROR: {e}")
-    
+
     return True
+
 
 if __name__ == "__main__":
     result = asyncio.run(test())
-    print(f"\nTest result: {'PASS' if result else 'FAIL'}") 
+    print(f"\nTest result: {'PASS' if result else 'FAIL'}")

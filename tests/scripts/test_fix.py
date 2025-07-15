@@ -3,9 +3,10 @@
 Test script to verify MongoDB connection fix
 """
 
-import requests
 import json
 import time
+
+import requests
 
 
 def test_api_after_fix():
@@ -38,7 +39,9 @@ def test_api_after_fix():
         }
 
         response = requests.post(
-            "http://localhost:8000/api/literature", json=data, timeout=15
+            "http://localhost:8000/api/literature",
+            json=data,
+            timeout=15,
         )
         print(f"✅ Literature submission: {response.status_code}")
 
@@ -55,14 +58,15 @@ def test_api_after_fix():
                 time.sleep(3)
 
                 status_response = requests.get(
-                    f"http://localhost:8000/api/task/{task_id}", timeout=10
+                    f"http://localhost:8000/api/task/{task_id}",
+                    timeout=10,
                 )
                 print(f"✅ Task status: {status_response.status_code}")
 
                 if status_response.status_code == 200:
                     status_result = status_response.json()
                     print(
-                        f"   Task status: {json.dumps(status_result, indent=2, ensure_ascii=False)}"
+                        f"   Task status: {json.dumps(status_result, indent=2, ensure_ascii=False)}",
                     )
                     return True
 

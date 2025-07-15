@@ -9,7 +9,8 @@ import logging
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
-import httpx
+import requests
+from requests.exceptions import RequestException, Timeout
 
 from ..settings import Settings
 
@@ -82,7 +83,10 @@ class SemanticScholarClient:
             "externalIds",
         ]
 
-    async def get_metadata(
+        self.session = requests.Session()
+        self.session.headers.update(self.headers)
+
+    def get_metadata(
         self,
         identifier: str,
         id_type: str = "auto",
@@ -148,28 +152,26 @@ class SemanticScholarClient:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(url, headers=self.headers, params=params)
+            response = self.session.get(url, params=params, timeout=self.timeout)
 
-                if response.status_code == 200:
-                    data = response.json()
-                    return await self._parse_paper_data(data)
-                elif response.status_code == 404:
-                    logger.info(f"Paper {identifier} not found in Semantic Scholar")
-                    return None
-                else:
-                    error_msg = f"Semantic Scholar API error {response.status_code}: {response.text}"
-                    logger.error(error_msg)
-                    raise Exception(error_msg)
+            if response.status_code == 200:
+                data = response.json()
+                return self._parse_paper_data(data)
+            elif response.status_code == 404:
+                logger.info(f"Paper {identifier} not found in Semantic Scholar")
+                return None
+            else:
+                response.raise_for_status()
 
-        except httpx.TimeoutException:
+        except Timeout:
             logger.error(f"Semantic Scholar API timeout for: {identifier}")
             raise Exception("Semantic Scholar API request timed out")
-        except Exception as e:
+        except RequestException as e:
             logger.error(f"Semantic Scholar API error for {identifier}: {e}")
             raise Exception(f"Semantic Scholar API request failed: {e!s}")
+        return None
 
-    async def get_references(
+    def get_references(
         self,
         identifier: str,
         limit: int = 100,
@@ -210,32 +212,30 @@ class SemanticScholarClient:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(url, headers=self.headers, params=params)
+            response = self.session.get(url, params=params, timeout=self.timeout)
 
-                if response.status_code == 200:
-                    data = response.json()
-                    references = []
+            if response.status_code == 200:
+                data = response.json()
+                references = []
 
-                    for ref_item in data.get("data", []):
-                        cited_paper = ref_item.get("citedPaper", {})
-                        if cited_paper:
-                            parsed_ref = await self._parse_paper_data(cited_paper)
-                            if parsed_ref:
-                                references.append(parsed_ref)
+                for ref_item in data.get("data", []):
+                    cited_paper = ref_item.get("citedPaper", {})
+                    if cited_paper:
+                        parsed_ref = self._parse_paper_data(cited_paper)
+                        if parsed_ref:
+                            references.append(parsed_ref)
 
-                    return references
-                elif response.status_code == 404:
-                    logger.info(f"No references found for paper: {identifier}")
-                    return []
-                else:
-                    error_msg = f"Semantic Scholar references API error {response.status_code}: {response.text}"
-                    logger.error(error_msg)
-                    raise Exception(error_msg)
+                return references
+            elif response.status_code == 404:
+                logger.info(f"No references found for paper: {identifier}")
+                return []
+            else:
+                response.raise_for_status()
 
-        except Exception as e:
+        except RequestException as e:
             logger.error(f"Error getting references for {identifier}: {e}")
             raise Exception(f"Failed to get references: {e!s}")
+        return []
 
     def _detect_identifier_type(self, identifier: str) -> str:
         """Detect the type of identifier."""
@@ -249,76 +249,69 @@ class SemanticScholarClient:
             return "doi"
         elif identifier_lower.startswith("arxiv:") or "arxiv" in identifier_lower:
             return "arxiv"
-        elif len(identifier) == 40:  # Semantic Scholar paper IDs are 40 characters
+        # Basic check for S2 Paper ID (40-char hex string)
+        elif len(identifier) == 40 and all(
+            c in "0123456789abcdef" for c in identifier_lower
+        ):
             return "paper_id"
         else:
-            return "paper_id"  # Default assumption
+            return "unknown"  # Or could be search query
 
-    async def _parse_paper_data(self, paper_data: Dict) -> Dict[str, Any]:
+    def _parse_paper_data(self, paper_data: Dict) -> Dict[str, Any]:
         """
-        Parse Semantic Scholar paper data into our standard format.
+        Parse paper data into our standard format.
 
         Args:
             paper_data: Raw paper data from Semantic Scholar API
 
         Returns:
-            dict: Parsed metadata in our standard format
+            dict: Parsed paper data
         """
+        if not paper_data or not paper_data.get("paperId"):
+            return {}
+
         try:
             parsed = {
                 "source": "Semantic Scholar API",
-                "s2_paper_id": paper_data.get("paperId"),
+                "paper_id": paper_data.get("paperId"),
                 "title": paper_data.get("title"),
                 "abstract": paper_data.get("abstract"),
                 "venue": paper_data.get("venue"),
                 "year": paper_data.get("year"),
-                "authors": [],
-                "external_ids": paper_data.get("externalIds", {}),
-                "url": paper_data.get("url"),
-                "citation_count": paper_data.get("citationCount", 0),
-                "reference_count": paper_data.get("referenceCount", 0),
+                "reference_count": paper_data.get("referenceCount"),
+                "citation_count": paper_data.get("citationCount"),
                 "influential_citation_count": paper_data.get(
-                    "influentialCitationCount",
-                    0,
+                    "influentialCitationCount"
                 ),
-                "is_open_access": paper_data.get("isOpenAccess", False),
-                "open_access_pdf": paper_data.get("openAccessPdf"),
-                "fields_of_study": paper_data.get("fieldsOfStudy", []),
-                "s2_fields_of_study": paper_data.get("s2FieldsOfStudy", []),
-                "publication_types": paper_data.get("publicationTypes", []),
+                "is_open_access": paper_data.get("isOpenAccess"),
+                "open_access_pdf": (paper_data.get("openAccessPdf") or {}).get("url"),
+                "fields_of_study": paper_data.get("fieldsOfStudy"),
+                "s2_fields_of_study": [
+                    field.get("category")
+                    for field in paper_data.get("s2FieldsOfStudy", [])
+                ],
+                "publication_types": paper_data.get("publicationTypes"),
                 "publication_date": paper_data.get("publicationDate"),
-                "journal": paper_data.get("journal"),
-                "publication_venue": paper_data.get("publicationVenue"),
-                "tldr": paper_data.get("tldr"),
-                "raw_data": paper_data,  # Keep original data for reference
-            }
-
-            # Extract authors
-            if paper_data.get("authors"):
-                for author in paper_data["authors"]:
-                    author_info = {
-                        "s2_author_id": author.get("authorId"),
-                        "name": author.get("name"),
-                        "url": author.get("url"),
-                        "affiliations": author.get("affiliations", []),
-                        "external_ids": author.get("externalIds", {}),
-                    }
-                    parsed["authors"].append(author_info)
-
-            # Extract DOI from external IDs
-            if parsed["external_ids"] and "DOI" in parsed["external_ids"]:
-                parsed["doi"] = parsed["external_ids"]["DOI"]
-
-            # Extract ArXiv ID
-            if parsed["external_ids"] and "ArXiv" in parsed["external_ids"]:
-                parsed["arxiv_id"] = parsed["external_ids"]["ArXiv"]
-
-            return parsed
-
-        except Exception as e:
-            logger.error(f"Error parsing Semantic Scholar paper data: {e}")
-            return {
-                "source": "Semantic Scholar API",
-                "error": str(e),
+                "journal": (paper_data.get("journal") or {}).get("name"),
+                "authors": self._parse_authors(paper_data.get("authors", [])),
+                "external_ids": paper_data.get("externalIds"),
+                "url": paper_data.get("url"),
+                "tldr": (paper_data.get("tldr") or {}).get("text"),
                 "raw_data": paper_data,
             }
+            return parsed
+        except Exception as e:
+            logger.error(f"Error parsing Semantic Scholar paper data: {e}")
+            return {}
+
+    def _parse_authors(self, authors_data: List[Dict]) -> List[Dict]:
+        """Parse author data."""
+        parsed_authors = []
+        for author in authors_data:
+            parsed_authors.append(
+                {
+                    "author_id": author.get("authorId"),
+                    "name": author.get("name"),
+                }
+            )
+        return parsed_authors

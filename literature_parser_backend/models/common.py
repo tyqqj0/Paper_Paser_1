@@ -73,7 +73,7 @@ class PyObjectId(ObjectId):
 def create_object_id_field(
     description: str = "MongoDB ObjectId",
     example: str = "507f1f77bcf86cd799439011",
-) -> Field:
+) -> Any:
     """Helper function to create ObjectId fields with consistent metadata."""
     return Field(
         description=description,

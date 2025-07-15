@@ -12,7 +12,7 @@ from literature_parser_backend.worker.celery_app import celery_app
 router = APIRouter(prefix="/task", tags=["任务管理"])
 
 
-@router.get("/{task_id}", summary="查询任务状态") 
+@router.get("/{task_id}", summary="查询任务状态")
 async def get_task_status(task_id: str) -> TaskStatusDTO:
     """
     查询Celery任务的状态和结果

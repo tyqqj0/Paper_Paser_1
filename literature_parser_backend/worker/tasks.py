@@ -5,16 +5,15 @@ This module contains the core literature processing task that implements
 the intelligent hybrid workflow for gathering metadata and references.
 """
 
-import asyncio
 import hashlib
 import logging
 import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+import pymongo
 from celery import current_task
 
-from ..db import LiteratureDAO, connect_to_mongodb
 from ..models import (
     AuthorModel,
     ContentModel,
@@ -24,13 +23,8 @@ from ..models import (
     ReferenceModel,
     TaskInfoModel,
 )
-from ..services import CrossRefClient, GrobidClient, SemanticScholarClient
 from ..settings import Settings
 from .celery_app import celery_app
-
-# Sync MongoDB client for Celery tasks
-import pymongo
-from bson import ObjectId
 
 logger = logging.getLogger(__name__)
 
@@ -38,47 +32,32 @@ logger = logging.getLogger(__name__)
 def _save_literature_sync(literature: LiteratureModel, settings: Settings) -> str:
     """
     Save literature to MongoDB using synchronous operations for Celery compatibility.
-    
+
     Args:
         literature: Literature data to save
         settings: Application settings
-        
+
     Returns:
         str: The created literature ID
     """
-    # Create MongoDB connection string with admin auth database
     mongo_url = f"mongodb://{settings.db_user}:{settings.db_pass}@{settings.db_host}:{settings.db_port}/admin"
-    
-    # Connect using sync pymongo
     client = pymongo.MongoClient(mongo_url)
-    # Use the business database, not the auth database
     db = client[settings.db_base]
-    collection = db.literatures  # Use consistent collection name
-    
+    collection = db.literatures
+
     try:
-        # Convert to dict and insert
         doc_data = literature.model_dump()
-        
-        # Ensure created_at and updated_at are set
         now = datetime.now()
         doc_data["created_at"] = now
         doc_data["updated_at"] = now
-        
-        # Insert document
         result = collection.insert_one(doc_data)
-        
         logger.info(f"Literature saved to MongoDB with ID: {result.inserted_id}")
         return str(result.inserted_id)
-        
     finally:
         client.close()
 
 
-# Load settings and initialize clients
 settings = Settings()
-grobid_client = GrobidClient(settings)
-crossref_client = CrossRefClient(settings)
-semantic_scholar_client = SemanticScholarClient(settings)
 
 
 def update_task_status(stage: str, progress: int = None, details: str = None):
@@ -104,19 +83,12 @@ def extract_authoritative_identifiers(
 ) -> Tuple[IdentifiersModel, str]:
     """
     Extract authoritative identifiers from source data.
-
     Priority: DOI > ArXiv ID > Other academic IDs > Generated fingerprint
-
-    :param source: Source data dictionary
-    :return: Tuple of (IdentifiersModel, primary_identifier_type)
     """
     identifiers = IdentifiersModel()
     primary_type = None
-
-    # Extract DOI with highest priority
     doi_pattern = r"10\.\d{4,}/[^\s]+"
 
-    # Check URL for DOI
     if source.get("url"):
         url = source["url"]
         if "doi.org" in url:
@@ -131,24 +103,19 @@ def extract_authoritative_identifiers(
                 if not primary_type:
                     primary_type = "arxiv"
 
-    # Check direct DOI field
     if source.get("doi") and not identifiers.doi:
         identifiers.doi = source["doi"]
         primary_type = "doi"
 
-    # Check direct ArXiv ID
     if source.get("arxiv_id") and not identifiers.arxiv_id:
         identifiers.arxiv_id = source["arxiv_id"]
         if not primary_type:
             primary_type = "arxiv"
 
-    # Generate fingerprint if no other identifiers found
     if not identifiers.doi and not identifiers.arxiv_id:
         title = source.get("title", "")
         authors = source.get("authors", "")
         year = source.get("year", "")
-
-        # Create content for fingerprint
         content = f"{title}|{authors}|{year}".lower().strip()
         if content and content != "||":
             identifiers.fingerprint = hashlib.md5(content.encode()).hexdigest()[:16]
@@ -157,460 +124,113 @@ def extract_authoritative_identifiers(
     return identifiers, primary_type or "fingerprint"
 
 
-async def fetch_metadata_waterfall(
-    identifiers: IdentifiersModel,
-    pdf_content: Optional[bytes] = None,
-) -> Tuple[Optional[MetadataModel], Dict[str, Any]]:
+def _process_literature(task_id: str, source: Dict[str, Any]) -> str:
     """
-    Fetch metadata using waterfall approach: CrossRef/Semantic Scholar -> GROBID fallback.
-
-    :param identifiers: Authoritative identifiers
-    :param pdf_content: Optional PDF content for GROBID fallback
-    :return: Tuple of (MetadataModel, raw_data_dict)
-    """
-    metadata = None
-    raw_data = {}
-
-    update_task_status("正在获取元数据", 20, "尝试从外部API获取")
-
-    # Try CrossRef first for DOI
-    if identifiers.doi:
-        try:
-            logger.info(f"Fetching metadata from CrossRef for DOI: {identifiers.doi}")
-            crossref_data = await crossref_client.get_metadata_by_doi(identifiers.doi)
-            if crossref_data:
-                raw_data["crossref"] = crossref_data
-                metadata = convert_crossref_to_metadata(crossref_data)
-                logger.info("Successfully got metadata from CrossRef")
-
-        except Exception as e:
-            logger.warning(f"CrossRef API failed: {e}")
-
-    # Try Semantic Scholar if CrossRef failed or for ArXiv
-    if not metadata and (identifiers.doi or identifiers.arxiv_id):
-        try:
-            identifier = identifiers.doi or identifiers.arxiv_id
-            logger.info(f"Fetching metadata from Semantic Scholar for: {identifier}")
-            s2_data = await semantic_scholar_client.get_metadata(identifier)
-            if s2_data:
-                raw_data["semantic_scholar"] = s2_data
-                if not metadata:  # Only use if CrossRef didn't provide data
-                    metadata = convert_semantic_scholar_to_metadata(s2_data)
-                logger.info("Successfully got metadata from Semantic Scholar")
-
-        except Exception as e:
-            logger.warning(f"Semantic Scholar API failed: {e}")
-
-    # Fallback to GROBID if APIs failed and we have PDF
-    if not metadata and pdf_content:
-        try:
-            update_task_status("正在解析PDF元数据", 40, "使用GROBID解析PDF标题信息")
-            logger.info("Falling back to GROBID for metadata extraction")
-            grobid_data = await grobid_client.process_header_only(pdf_content)
-            if grobid_data:
-                raw_data["grobid_header"] = grobid_data
-                metadata = convert_grobid_to_metadata(grobid_data)
-                logger.info("Successfully extracted metadata from GROBID")
-
-        except Exception as e:
-            logger.error(f"GROBID fallback failed: {e}")
-
-    return metadata, raw_data
-
-
-async def fetch_references_waterfall(
-    identifiers: IdentifiersModel,
-    pdf_content: Optional[bytes] = None,
-) -> Tuple[List[ReferenceModel], Dict[str, Any]]:
-    """
-    Fetch references using waterfall approach: Semantic Scholar -> GROBID fallback.
-
-    :param identifiers: Authoritative identifiers
-    :param pdf_content: Optional PDF content for GROBID fallback
-    :return: Tuple of (List[ReferenceModel], raw_data_dict)
-    """
-    references = []
-    raw_data = {}
-
-    update_task_status("正在获取参考文献", 60, "尝试从Semantic Scholar获取")
-
-    # Try Semantic Scholar first
-    if identifiers.doi or identifiers.arxiv_id:
-        try:
-            identifier = identifiers.doi or identifiers.arxiv_id
-            logger.info(f"Fetching references from Semantic Scholar for: {identifier}")
-            s2_refs = await semantic_scholar_client.get_references(identifier)
-            if s2_refs:
-                raw_data["semantic_scholar_refs"] = s2_refs
-                references = convert_semantic_scholar_references(s2_refs)
-                logger.info(
-                    f"Successfully got {len(references)} references from Semantic Scholar",
-                )
-
-        except Exception as e:
-            logger.warning(f"Semantic Scholar references failed: {e}")
-
-    # Fallback to GROBID if no references found and we have PDF
-    if not references and pdf_content:
-        try:
-            update_task_status("正在解析PDF参考文献", 70, "使用GROBID从PDF提取参考文献")
-            logger.info("Falling back to GROBID for reference extraction")
-            grobid_data = await grobid_client.process_pdf(
-                pdf_content,
-                include_raw_citations=True,
-            )
-            if grobid_data and grobid_data.get("references"):
-                raw_data["grobid_refs"] = grobid_data["references"]
-                references = convert_grobid_references(grobid_data["references"])
-                logger.info(
-                    f"Successfully extracted {len(references)} references from GROBID",
-                )
-
-        except Exception as e:
-            logger.error(f"GROBID reference extraction failed: {e}")
-
-    return references, raw_data
-
-
-def convert_crossref_to_metadata(crossref_data: Dict[str, Any]) -> MetadataModel:
-    """Convert CrossRef API response to MetadataModel."""
-    work = crossref_data.get("message", {})
-
-    # Extract authors
-    authors = []
-    for author_data in work.get("author", []):
-        author = AuthorModel(
-            full_name=f"{author_data.get('given', '')} {author_data.get('family', '')}".strip(),
-            sequence=author_data.get("sequence", "additional"),
-        )
-        authors.append(author)
-
-    # Extract publication date
-    published_date = None
-    if work.get("published-print"):
-        date_parts = work["published-print"].get("date-parts", [[]])[0]
-        if date_parts:
-            published_date = (
-                f"{date_parts[0]}-{date_parts[1]:02d}-{date_parts[2]:02d}"
-                if len(date_parts) >= 3
-                else f"{date_parts[0]}"
-            )
-
-    return MetadataModel(
-        title=work.get("title", [""])[0],
-        authors=authors,
-        abstract=work.get("abstract", ""),
-        publication_year=work.get("published-print", {}).get("date-parts", [[None]])[0][
-            0
-        ],
-        publication_date=published_date,
-        journal=work.get("container-title", [""])[0],
-        volume=work.get("volume"),
-        issue=work.get("issue"),
-        pages=work.get("page"),
-        publisher=work.get("publisher"),
-        language="en",  # CrossRef doesn't typically provide language
-        keywords=[],  # CrossRef doesn't provide keywords in this format
-        citation_count=work.get("is-referenced-by-count", 0),
-    )
-
-
-def convert_semantic_scholar_to_metadata(s2_data: Dict[str, Any]) -> MetadataModel:
-    """Convert Semantic Scholar API response to MetadataModel."""
-    # Extract authors
-    authors = []
-    for author_data in s2_data.get("authors", []):
-        author = AuthorModel(
-            full_name=author_data.get("name", ""),
-            sequence="first" if len(authors) == 0 else "additional",
-        )
-        authors.append(author)
-
-    return MetadataModel(
-        title=s2_data.get("title", ""),
-        authors=authors,
-        abstract=s2_data.get("abstract", ""),
-        publication_year=s2_data.get("year"),
-        publication_date=s2_data.get("publicationDate"),
-        journal=s2_data.get("venue", ""),
-        volume=None,  # S2 doesn't provide volume/issue typically
-        issue=None,
-        pages=None,
-        publisher=None,
-        language="en",  # S2 doesn't typically provide language
-        keywords=s2_data.get("fieldsOfStudy", []),
-        citation_count=s2_data.get("citationCount", 0),
-    )
-
-
-def convert_grobid_to_metadata(grobid_data: Dict[str, Any]) -> MetadataModel:
-    """Convert GROBID response to MetadataModel."""
-    # GROBID data structure depends on the parsed XML
-    # This is a simplified conversion
-    header = grobid_data.get("header", {})
-
-    # Extract authors from GROBID
-    authors = []
-    for author_data in header.get("authors", []):
-        author = AuthorModel(
-            full_name=author_data.get("full_name", ""),
-            sequence="first" if len(authors) == 0 else "additional",
-        )
-        authors.append(author)
-
-    return MetadataModel(
-        title=header.get("title", ""),
-        authors=authors,
-        abstract=header.get("abstract", ""),
-        publication_year=header.get("year"),
-        publication_date=header.get("date"),
-        journal=header.get("journal", ""),
-        volume=header.get("volume"),
-        issue=header.get("issue"),
-        pages=header.get("pages"),
-        publisher=None,
-        language="en",
-        keywords=[],
-        citation_count=0,
-    )
-
-
-def convert_semantic_scholar_references(
-    s2_refs: List[Dict[str, Any]],
-) -> List[ReferenceModel]:
-    """Convert Semantic Scholar references to ReferenceModel list."""
-    references = []
-
-    for ref_data in s2_refs:
-        paper = ref_data.get("citedPaper", {})
-        if paper:
-            # Create raw text representation
-            title = paper.get("title", "")
-            authors = [author.get("name", "") for author in paper.get("authors", [])]
-            venue = paper.get("venue", "")
-            year = paper.get("year")
-
-            raw_text = (
-                f"{title}. {', '.join(authors)}. {venue} ({year})"
-                if all([title, authors, year])
-                else str(paper)
-            )
-
-            reference = ReferenceModel(
-                raw_text=raw_text,
-                parsed={
-                    "title": title,
-                    "authors": authors,
-                    "journal": venue,
-                    "year": year,
-                    "doi": None,  # Would need to extract from externalIds
-                    "arxiv_id": None,
-                },
-                source="semantic_scholar",
-            )
-            references.append(reference)
-
-    return references
-
-
-def convert_grobid_references(
-    grobid_refs: List[Dict[str, Any]],
-) -> List[ReferenceModel]:
-    """Convert GROBID references to ReferenceModel list."""
-    references = []
-
-    for ref_data in grobid_refs:
-        reference = ReferenceModel(
-            raw_text=ref_data.get("raw_text", ""),
-            parsed={
-                "title": ref_data.get("title", ""),
-                "authors": ref_data.get("authors", []),
-                "journal": ref_data.get("journal", ""),
-                "year": ref_data.get("year"),
-                "doi": ref_data.get("doi"),
-            },
-            source="grobid",
-        )
-        references.append(reference)
-
-    return references
-
-
-async def _process_literature_async(task_id: str, source: Dict[str, Any]) -> str:
-    """
-    Process a literature source through the intelligent hybrid workflow.
-
-    This is the main Celery task that orchestrates the entire literature
-    processing pipeline, from identifier extraction to data persistence.
-
-    :param source: Literature source information
-    :return: ID of the created literature document
+    Main synchronous logic to process literature.
+    Orchestrates the entire workflow from identifier extraction to saving the result.
     """
     try:
-        update_task_status("正在初始化任务", 5, "解析输入数据")
+        update_task_status("任务开始", 0, f"开始处理: {source.get('title', 'N/A')}")
 
-        # Process source data
-        logger.info(f"Processing literature from source: {source}")
-        logger.info(f"Source type: {type(source)}")
-        logger.info(f"Source keys: {list(source.keys()) if isinstance(source, dict) else 'Not a dict'}")
-        logger.info(
-            f"Processing literature from source: {source.get('url') or source.get('doi') or 'file upload'}",
-        )
-
-        # Step 1: Extract authoritative identifiers
-        update_task_status("正在提取权威标识符", 10)
+        # 1. Extract authoritative identifiers
+        update_task_status("正在提取标识符", 10)
         identifiers, primary_type = extract_authoritative_identifiers(source)
         logger.info(
-            f"Extracted identifiers: {identifiers.model_dump()}, primary: {primary_type}",
+            f"提取到标识符: {identifiers.model_dump_json(exclude_none=True)} (主要类型: {primary_type})"
         )
+        if not any([identifiers.doi, identifiers.arxiv_id, identifiers.fingerprint]):
+            raise ValueError("无法提取任何有效标识符，任务终止。")
 
-        # Step 2: Content获取 (瀑布流) - Download PDF and parse content
-        update_task_status("正在获取文献内容", 25)
-        try:
+            # Lazily import fetchers to avoid circular dependencies and scope them locally.
             from .content_fetcher import ContentFetcher
-            
-            content_fetcher = ContentFetcher(settings)
-            content, pdf_content, content_raw_data = await content_fetcher.fetch_content_waterfall(
-                identifiers, source, None  # metadata will be fetched next
-            )
-            
-            logger.info(f"Content fetch completed: {content_raw_data.get('download_status', 'unknown')}")
-            
-        except Exception as e:
-            logger.error(f"Content fetch failed: {e}")
-            # Create basic content model as fallback
-            content = ContentModel(
-                pdf_url=source.get("pdf_url"),
-                source_page_url=source.get("url") if source.get("url") and not source.get("url", "").endswith(".pdf") else None,
-                parsed_fulltext=None
-            )
-            pdf_content = None
+        from .metadata_fetcher import MetadataFetcher
+        from .references_fetcher import ReferencesFetcher
 
-        # Step 3: Metadata获取 (瀑布流) - CrossRef -> Semantic Scholar -> GROBID
-        metadata, metadata_raw_data = None, {}
-        try:
-            update_task_status("正在获取元数据", 40, f"使用{primary_type}标识符")
-            
-            # Import and use the real metadata fetcher
-            from .metadata_fetcher import MetadataFetcher
-            
-            fetcher = MetadataFetcher(settings)
-            metadata, metadata_raw_data = await fetcher.fetch_metadata_waterfall(
-                identifiers, primary_type, source
-            )
-            
-            logger.info(f"Successfully fetched metadata with title: {metadata.title}")
+        content_fetcher = ContentFetcher(settings)
+        metadata_fetcher = MetadataFetcher(settings)
+        references_fetcher = ReferencesFetcher(settings)
 
-        except Exception as e:
-            logger.error(f"Metadata fetching failed: {e}")
-            # Create minimal metadata with correct field names
-            title = source.get("title") or source.get("url", "Unknown Title")
-            if not title or title == "":
-                title = "Unknown Title"
-                
-            metadata = MetadataModel(
-                title=title,
-                authors=[],
-                year=2024,
-                journal=None,
-                abstract=None,
-                keywords=[],
-                source_priority=["fallback"],
-            )
+        # 2. Fetch content (PDF) - a blocking I/O operation.
+        # This is a candidate for future optimization if I/O becomes a bottleneck.
+        update_task_status("正在获取内容", 25)
+        content, pdf_content, content_raw_data = (
+            content_fetcher.fetch_content_waterfall(identifiers, source, None)
+        )
+        logger.info(f"内容获取完成: {content_raw_data.get('download_status', '未知')}")
 
-        # Step 4: References获取 (瀑布流) - Semantic Scholar -> GROBID
-        references, references_raw_data = [], {}
-        try:
-            update_task_status("正在获取参考文献", 65)
-            
-            # Import and use the real references fetcher
-            from .references_fetcher import ReferencesFetcher
-            
-            fetcher = ReferencesFetcher(settings)
-            references, references_raw_data = await fetcher.fetch_references_waterfall(
-                identifiers, primary_type, pdf_content
-            )
-            
-            logger.info(f"Successfully fetched {len(references)} references")
+        # 3. Fetch metadata - multiple blocking I/O calls.
+        # This is a prime candidate for parallel execution (e.g., using a thread pool).
+        update_task_status("正在获取元数据", 40, f"使用 {primary_type} 标识符")
+        metadata, metadata_raw_data = metadata_fetcher.fetch_metadata_waterfall(
+            identifiers, primary_type, source
+        )
+        if not metadata:
+            raise ValueError("所有元数据源均失败，无法处理文献。")
+        logger.info(f"成功获取元数据，标题: {metadata.title}")
 
-        except Exception as e:
-            logger.error(f"Reference fetching failed: {e}")
-            # Fallback to empty references
-            references = []
-            references_raw_data = {
-                "source": "fallback",
-                "error": str(e),
-                "message": "Reference fetching failed, using empty references"
-            }
+        # 4. Fetch references - more blocking I/O.
+        # Also a candidate for parallel execution.
+        update_task_status("正在获取参考文献", 65)
+        references, references_raw_data = references_fetcher.fetch_references_waterfall(
+            identifiers, primary_type, pdf_content
+        )
+        logger.info(f"成功获取 {len(references)} 条参考文献")
 
-        # Step 5: 数据整合
-        update_task_status("正在整合数据", 80)
-
-        # Step 6: Create task info
+        # 5. Consolidate and save the final result.
+        update_task_status("正在整合与保存", 90)
         task_info = TaskInfoModel(
             task_id=task_id,
-            created_at=datetime.now(),
+            status="completed",
             processing_stages=[
                 "identifier_extraction",
+                "content_fetch",
                 "metadata_fetch",
                 "reference_fetch",
                 "data_integration",
             ],
-            total_processing_time=0,  # Would calculate actual time
-            success=True,
         )
 
-        # Step 7: Create final literature model
-        literature = LiteratureModel(
+        final_literature = LiteratureModel(
             identifiers=identifiers,
             metadata=metadata,
-            content=content,
             references=references,
+            content=content,
+            source_docs={
+                "initial_source": source,
+                "content_sources": content_raw_data,
+                "metadata_sources": metadata_raw_data,
+                "reference_sources": references_raw_data,
+            },
             task_info=task_info,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
         )
 
-        # Step 8: Save to MongoDB
-        update_task_status("正在保存到数据库", 90)
-        try:
-            # Use sync MongoDB operations to avoid event loop issues in Celery
-            logger.info("Saving literature to database using sync operations...")
-            literature_id = _save_literature_sync(literature, settings)
-            logger.info(f"Successfully created literature with ID: {literature_id}")
+        literature_id = _save_literature_sync(final_literature, settings)
+        update_task_status("任务完成", 100, f"文献已保存，ID: {literature_id}")
 
-        except Exception as e:
-            logger.error(f"Failed to save literature to database: {e}")
-            # For now, use a simulated ID to allow testing to continue
-            literature_id = f"lit_{task_id[:8]}"
-            logger.warning(f"Using fallback literature ID: {literature_id}")
-            # Don't raise the exception to allow testing to continue
-
-        update_task_status("任务完成", 100, f"文献ID: {literature_id}")
-
-        # Return result in the format expected by the API
-        return {
-            "literature_id": literature_id,
-            "status": "success",
-            "message": f"文献处理完成，ID: {literature_id}"
-        }
+        return literature_id
 
     except Exception as e:
-        logger.error(f"Task failed: {e}", exc_info=True)
-        update_task_status("任务失败", 0, f"错误: {e!s}")
+        logger.error(f"处理任务 {task_id} 时出错: {e}", exc_info=True)
+        update_task_status("任务失败", details=str(e))
         raise
 
 
 @celery_app.task(bind=True, name="process_literature_task")
 def process_literature_task(self, source: Dict[str, Any]) -> str:
     """
-    Celery task wrapper for async literature processing.
-
-    This function wraps the async literature processing logic
-    to work with Celery's synchronous task model.
-
-    :param source: Literature source information
-    :return: ID of the created literature document
+    Celery task to process a single literature source. Main entry point for the worker.
     """
-    # Run the async function in an event loop
-    return asyncio.run(_process_literature_async(self.request.id, source))
+    task_id = self.request.id
+    logger.info(f"接收到文献处理任务 {task_id}")
+    logger.info(f"来源数据: {source}")
+
+    try:
+        # Direct synchronous call, resolving the original event loop conflict.
+        result_id = _process_literature(task_id, source)
+        return result_id
+    except Exception as e:
+        logger.exception(f"任务 {task_id} 执行失败: {e}", exc_info=True)
+        self.update_state(
+            state="FAILURE", meta={"exc_type": type(e).__name__, "exc_message": str(e)}
+        )
+        raise
