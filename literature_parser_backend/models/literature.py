@@ -52,14 +52,16 @@ class MetadataModel(BaseModel):
 
     title: str = Field(..., description="Literature title")
     authors: List[AuthorModel] = Field(
-        default_factory=list, description="List of authors",
+        default_factory=list,
+        description="List of authors",
     )
     year: Optional[int] = Field(None, description="Publication year")
     journal: Optional[str] = Field(None, description="Journal or venue name")
     abstract: Optional[str] = Field(None, description="Literature abstract")
     keywords: List[str] = Field(default_factory=list, description="Keywords or tags")
     source_priority: List[str] = Field(
-        default_factory=list, description="Data sources in order of priority used",
+        default_factory=list,
+        description="Data sources in order of priority used",
     )
 
     class Config:
@@ -104,7 +106,8 @@ class ReferenceModel(BaseModel):
 
     raw_text: str = Field(..., description="Original raw reference string")
     parsed: Optional[Dict[str, Any]] = Field(
-        None, description="Structured parsed reference data",
+        None,
+        description="Structured parsed reference data",
     )
     source: str = Field(..., description="Source of this reference parsing")
 
@@ -145,27 +148,35 @@ class LiteratureModel(BaseModel):
     """
 
     id: Optional[PyObjectId] = Field(
-        default=None, alias="_id", description="MongoDB document ID",
+        default=None,
+        alias="_id",
+        description="MongoDB document ID",
     )
     user_id: Optional[PyObjectId] = Field(
-        None, description="ID of the user who created this literature",
+        None,
+        description="ID of the user who created this literature",
     )
     task_info: Optional[TaskInfoModel] = Field(
-        None, description="Information about the parsing task",
+        None,
+        description="Information about the parsing task",
     )
     identifiers: IdentifiersModel = Field(..., description="Authoritative identifiers")
     metadata: MetadataModel = Field(..., description="Literature metadata")
     content: ContentModel = Field(
-        default_factory=ContentModel, description="Content and parsing data",
+        default_factory=ContentModel,
+        description="Content and parsing data",
     )
     references: List[ReferenceModel] = Field(
-        default_factory=list, description="List of parsed references",
+        default_factory=list,
+        description="List of parsed references",
     )
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(), description="Creation timestamp",
+        default_factory=lambda: datetime.now(),
+        description="Creation timestamp",
     )
     updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(), description="Last update timestamp",
+        default_factory=lambda: datetime.now(),
+        description="Last update timestamp",
     )
 
     class Config:
@@ -205,7 +216,8 @@ class LiteratureSourceDTO(BaseModel):
     url: Optional[str] = Field(None, description="URL to the literature (ArXiv, etc.)")
     pdf_url: Optional[str] = Field(None, description="Direct URL to PDF file")
     title: Optional[str] = Field(
-        None, description="Literature title (for deduplication)",
+        None,
+        description="Literature title (for deduplication)",
     )
     authors: Optional[List[str]] = Field(None, description="List of author names")
 
@@ -225,7 +237,8 @@ class LiteratureCreateDTO(BaseModel):
 
     # 支持直接传入字段或通过source对象
     source: Optional[LiteratureSourceDTO] = Field(
-        None, description="Source information for the literature",
+        None,
+        description="Source information for the literature",
     )
 
     # 直接字段支持（向后兼容）
@@ -310,7 +323,8 @@ class LiteratureSummaryDTO(BaseModel):
     identifiers: IdentifiersModel = Field(..., description="Authoritative identifiers")
     metadata: MetadataModel = Field(..., description="Literature metadata")
     content: Dict[str, Any] = Field(
-        ..., description="Content info (without parsed_fulltext)",
+        ...,
+        description="Content info (without parsed_fulltext)",
     )
     references: List[ReferenceModel] = Field(..., description="List of references")
     created_at: datetime = Field(..., description="Creation timestamp")
@@ -347,11 +361,13 @@ class LiteratureFulltextDTO(BaseModel):
 
     literature_id: str = Field(..., description="Literature ID")
     parsed_fulltext: Optional[Dict[str, Any]] = Field(
-        None, description="Complete GROBID parsed content",
+        None,
+        description="Complete GROBID parsed content",
     )
     source: Optional[str] = Field(None, description="Source of the fulltext parsing")
     parsed_at: Optional[datetime] = Field(
-        None, description="When the fulltext was parsed",
+        None,
+        description="When the fulltext was parsed",
     )
 
     class Config:

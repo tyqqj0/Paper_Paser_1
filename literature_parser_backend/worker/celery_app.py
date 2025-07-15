@@ -43,7 +43,7 @@ celery_app.conf.update(
     result_persistent=True,
     # Task routing
     task_routes={
-        "literature_parser_worker.tasks.*": {"queue": "literature"},
+        "process_literature_task": {"queue": "literature"},
     },
     # Include task modules
     include=[

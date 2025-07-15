@@ -33,7 +33,11 @@ class TestLiteratureAPI:
     @patch("literature_parser_backend.web.api.literature.LiteratureDAO")
     @patch("literature_parser_backend.web.api.literature.process_literature_task")
     def test_create_literature_new(
-        self, mock_task, mock_dao_class, client, literature_data,
+        self,
+        mock_task,
+        mock_dao_class,
+        client,
+        literature_data,
     ):
         """测试提交新文献"""
         # 模拟DAO
@@ -177,7 +181,8 @@ class TestTaskAPI:
 
         # 验证revoke被调用
         mock_celery_app.control.revoke.assert_called_once_with(
-            "test-task-id", terminate=True,
+            "test-task-id",
+            terminate=True,
         )
 
 

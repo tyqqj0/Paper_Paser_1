@@ -20,7 +20,9 @@ class PyObjectId(ObjectId):
 
     @classmethod
     def __get_pydantic_core_schema__(
-        cls, source_type: Any, handler: GetJsonSchemaHandler,
+        cls,
+        source_type: Any,
+        handler: GetJsonSchemaHandler,
     ) -> core_schema.CoreSchema:
         """Define the core schema for PyObjectId validation."""
         return core_schema.json_or_python_schema(
@@ -55,7 +57,9 @@ class PyObjectId(ObjectId):
 
     @classmethod
     def __get_pydantic_json_schema__(
-        cls, core_schema: core_schema.CoreSchema, handler: GetJsonSchemaHandler,
+        cls,
+        core_schema: core_schema.CoreSchema,
+        handler: GetJsonSchemaHandler,
     ) -> JsonSchemaValue:
         """Define JSON schema for API documentation."""
         return {
@@ -67,7 +71,8 @@ class PyObjectId(ObjectId):
 
 
 def create_object_id_field(
-    description: str = "MongoDB ObjectId", example: str = "507f1f77bcf86cd799439011",
+    description: str = "MongoDB ObjectId",
+    example: str = "507f1f77bcf86cd799439011",
 ) -> Field:
     """Helper function to create ObjectId fields with consistent metadata."""
     return Field(

@@ -155,7 +155,8 @@ class CrossRefClient:
             raise Exception(f"CrossRef search failed: {e!s}")
 
     async def get_multiple_dois(
-        self, dois: List[str],
+        self,
+        dois: List[str],
     ) -> Dict[str, Optional[Dict[str, Any]]]:
         """
         Retrieve metadata for multiple DOIs in batch.
@@ -319,7 +320,9 @@ class CrossRefClient:
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.get(
-                    url, headers=self.headers, params={"mailto": self.mailto},
+                    url,
+                    headers=self.headers,
+                    params={"mailto": self.mailto},
                 )
 
                 if response.status_code == 200:
@@ -345,7 +348,9 @@ class CrossRefClient:
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.get(
-                    url, headers=self.headers, params={"mailto": self.mailto},
+                    url,
+                    headers=self.headers,
+                    params={"mailto": self.mailto},
                 )
 
                 if response.status_code == 200:

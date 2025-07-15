@@ -83,7 +83,9 @@ class SemanticScholarClient:
         ]
 
     async def get_metadata(
-        self, identifier: str, id_type: str = "auto",
+        self,
+        identifier: str,
+        id_type: str = "auto",
     ) -> Optional[Dict[str, Any]]:
         """
         Get metadata for a paper by various identifiers.
@@ -168,7 +170,9 @@ class SemanticScholarClient:
             raise Exception(f"Semantic Scholar API request failed: {e!s}")
 
     async def get_references(
-        self, identifier: str, limit: int = 100,
+        self,
+        identifier: str,
+        limit: int = 100,
     ) -> List[Dict[str, Any]]:
         """
         Get references for a paper.
@@ -274,7 +278,8 @@ class SemanticScholarClient:
                 "citation_count": paper_data.get("citationCount", 0),
                 "reference_count": paper_data.get("referenceCount", 0),
                 "influential_citation_count": paper_data.get(
-                    "influentialCitationCount", 0,
+                    "influentialCitationCount",
+                    0,
                 ),
                 "is_open_access": paper_data.get("isOpenAccess", False),
                 "open_access_pdf": paper_data.get("openAccessPdf"),

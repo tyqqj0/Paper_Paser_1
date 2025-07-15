@@ -13,20 +13,28 @@ services:
       redis:
         condition: service_healthy
     environment:
+      # App configuration
       LITERATURE_PARSER_BACKEND_HOST: 0.0.0.0
-      LITERATURE_PARSER_BACKEND_DB_HOST: literature_parser_backend-db
+      LITERATURE_PARSER_BACKEND_PORT: 8000
+      LITERATURE_PARSER_BACKEND_WORKERS_COUNT: 1
+      LITERATURE_PARSER_BACKEND_LOG_LEVEL: INFO
+      # Database configuration (no auth for development)
+      LITERATURE_PARSER_BACKEND_DB_HOST: db
       LITERATURE_PARSER_BACKEND_DB_PORT: 27017
-      LITERATURE_PARSER_BACKEND_DB_USER: literature_parser_backend
-      LITERATURE_PARSER_BACKEND_DB_PASS: literature_parser_backend
-      LITERATURE_PARSER_BACKEND_DB_BASE: admin
+      LITERATURE_PARSER_BACKEND_DB_USER: ""
+      LITERATURE_PARSER_BACKEND_DB_PASS: ""
+      LITERATURE_PARSER_BACKEND_DB_BASE: literature_parser
       # Redis configuration
-      REDIS_URL: redis://redis:6379/0
+      LITERATURE_PARSER_BACKEND_REDIS_HOST: redis
+      LITERATURE_PARSER_BACKEND_REDIS_PORT: 6379
+      LITERATURE_PARSER_BACKEND_REDIS_DB: 0
+      LITERATURE_PARSER_BACKEND_REDIS_PASSWORD: ""
       # External services
-      GROBID_URL: http://grobid:8070
-      CROSSREF_EMAIL: literature-parser@example.com
+      LITERATURE_PARSER_BACKEND_GROBID_BASE_URL: http://grobid:8070
+      LITERATURE_PARSER_BACKEND_CROSSREF_MAILTO: literature-parser@example.com
       # Celery configuration
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      LITERATURE_PARSER_BACKEND_CELERY_BROKER_URL: redis://redis:6379/0
+      LITERATURE_PARSER_BACKEND_CELERY_RESULT_BACKEND: redis://redis:6379/0
     networks:
       - literature_parser_network
     ports:
@@ -44,17 +52,20 @@ services:
         condition: service_started
     ports: []  # Worker doesn't need exposed ports
     environment:
-      LITERATURE_PARSER_BACKEND_HOST: 0.0.0.0
-      LITERATURE_PARSER_BACKEND_DB_HOST: literature_parser_backend-db
-      LITERATURE_PARSER_BACKEND_DB_PORT: 27017
-      LITERATURE_PARSER_BACKEND_DB_USER: literature_parser_backend
-      LITERATURE_PARSER_BACKEND_DB_PASS: literature_parser_backend
-      LITERATURE_PARSER_BACKEND_DB_BASE: admin
+      # Database configuration (no auth for development)
+      DB_HOST: db
+      DB_PORT: 27017
+      DB_USER: ""
+      DB_PASS: ""
+      DB_BASE: literature_parser
       # Redis configuration
-      REDIS_URL: redis://redis:6379/0
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      REDIS_PASSWORD: ""
       # External services
-      GROBID_URL: http://grobid:8070
-      CROSSREF_EMAIL: literature-parser@example.com
+      GROBID_BASE_URL: http://grobid:8070
+      CROSSREF_MAILTO: literature-parser@example.com
       # Celery configuration
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0

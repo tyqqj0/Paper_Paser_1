@@ -52,7 +52,8 @@ class LiteratureDAO:
             raise
 
     async def get_literature_by_id(
-        self, literature_id: str,
+        self,
+        literature_id: str,
     ) -> Optional[LiteratureModel]:
         """
         Retrieve a literature document by its ID.
@@ -204,7 +205,9 @@ class LiteratureDAO:
             return []
 
     async def update_literature(
-        self, literature_id: str, updates: Dict[str, Any],
+        self,
+        literature_id: str,
+        updates: Dict[str, Any],
     ) -> bool:
         """
         Update a literature document.
@@ -222,7 +225,8 @@ class LiteratureDAO:
 
             # Update document
             result = await self.collection().update_one(
-                {"_id": object_id}, {"$set": updates},
+                {"_id": object_id},
+                {"$set": updates},
             )
 
             success = result.modified_count > 0
@@ -277,7 +281,8 @@ class LiteratureDAO:
             return 0
 
     async def get_recent_literature(
-        self, limit: int = 10,
+        self,
+        limit: int = 10,
     ) -> List[LiteratureSummaryDTO]:
         """
         Get most recently created literature documents.
@@ -286,7 +291,11 @@ class LiteratureDAO:
         :return: List of recent literature summaries
         """
         return await self.search_literature(
-            query=None, limit=limit, skip=0, sort_by="created_at", sort_order=-1,
+            query=None,
+            limit=limit,
+            skip=0,
+            sort_by="created_at",
+            sort_order=-1,
         )
 
     async def find_by_title(self, title: str) -> Optional[LiteratureModel]:
@@ -302,7 +311,12 @@ class LiteratureDAO:
 
             # Use regex for case-insensitive search
             doc = await self.collection().find_one(
-                {"metadata.title": {"$regex": f"^{normalized_title}$", "$options": "i"}},
+                {
+                    "metadata.title": {
+                        "$regex": f"^{normalized_title}$",
+                        "$options": "i",
+                    },
+                },
             )
 
             if not doc:
@@ -315,7 +329,9 @@ class LiteratureDAO:
             return None
 
     async def find_by_title_fuzzy(
-        self, title: str, similarity_threshold: float = 0.8,
+        self,
+        title: str,
+        similarity_threshold: float = 0.8,
     ) -> Optional[LiteratureModel]:
         """
         Find literature by title with fuzzy matching.

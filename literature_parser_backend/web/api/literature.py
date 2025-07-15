@@ -53,7 +53,8 @@ async def create_literature(literature_data: LiteratureCreateDTO):
             if not existing_literature:
                 logger.info("尝试标题模糊匹配...")
                 existing_literature = await dao.find_by_title_fuzzy(
-                    effective_values["title"], 0.85,
+                    effective_values["title"],
+                    0.85,
                 )
 
         if existing_literature:
@@ -106,7 +107,8 @@ async def get_literature_summary(literature_id: str) -> LiteratureSummaryDTO:
 
         if not literature:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="文献不存在",
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="文献不存在",
             )
 
         # 转换为摘要DTO
@@ -149,7 +151,8 @@ async def get_literature_fulltext(literature_id: str) -> LiteratureFulltextDTO:
 
         if not literature:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="文献不存在",
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="文献不存在",
             )
 
         # 转换为完整内容DTO

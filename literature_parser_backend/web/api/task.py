@@ -80,7 +80,8 @@ async def get_task_status(task_id: str) -> TaskStatusDTO:
             if hasattr(task_result, "info") and isinstance(task_result.info, dict):
                 info = task_result.info
                 response_data["progress_percentage"] = info.get(
-                    "progress_percentage", 50,
+                    "progress_percentage",
+                    50,
                 )
             else:
                 response_data["progress_percentage"] = 50
@@ -103,7 +104,8 @@ async def get_task_status(task_id: str) -> TaskStatusDTO:
         # 如果是无效的任务ID，返回404
         if "Invalid task ID" in str(e) or "not found" in str(e):
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在",
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="任务不存在",
             )
 
         # 其他错误返回500

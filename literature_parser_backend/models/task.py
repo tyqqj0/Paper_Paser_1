@@ -43,7 +43,8 @@ class TaskErrorInfo(BaseModel):
     error_type: str = Field(..., description="Type/category of the error")
     error_message: str = Field(..., description="Human-readable error message")
     error_details: Optional[Dict[str, Any]] = Field(
-        None, description="Additional error details for debugging",
+        None,
+        description="Additional error details for debugging",
     )
 
     class Config:
@@ -72,22 +73,28 @@ class TaskStatusDTO(BaseModel):
     status: TaskStatus = Field(..., description="Current task status")
     stage: Optional[TaskStage] = Field(None, description="Current processing stage")
     literature_id: Optional[str] = Field(
-        None, description="Literature ID (available when status is SUCCESS)",
+        None,
+        description="Literature ID (available when status is SUCCESS)",
     )
     resource_url: Optional[str] = Field(
         None,
         description="URL to access the literature (available when status is SUCCESS)",
     )
     progress_percentage: Optional[int] = Field(
-        None, description="Processing progress (0-100)", ge=0, le=100,
+        None,
+        description="Processing progress (0-100)",
+        ge=0,
+        le=100,
     )
     error_info: Optional[TaskErrorInfo] = Field(
-        None, description="Error details (available when status is FAILURE)",
+        None,
+        description="Error details (available when status is FAILURE)",
     )
     created_at: datetime = Field(..., description="Task creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
     estimated_completion: Optional[datetime] = Field(
-        None, description="Estimated completion time",
+        None,
+        description="Estimated completion time",
     )
 
     class Config:

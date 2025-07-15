@@ -27,7 +27,8 @@ def test_basic_models():
 
     # Test IdentifiersModel
     identifiers = IdentifiersModel(
-        doi="10.48550/arXiv.1706.03762", arxiv_id="1706.03762",
+        doi="10.48550/arXiv.1706.03762",
+        arxiv_id="1706.03762",
     )
     print(f"✓ IdentifiersModel: DOI={identifiers.doi}")
 
