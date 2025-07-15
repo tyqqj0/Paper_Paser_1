@@ -1,48 +1,15 @@
 services:
   api:
-    ports:
-      # Exposes application port.
-      - "8000:8000"
     build:
       context: .
-      dockerfile: ./Dockerfile
-    volumes:
-      # Adds current directory as volume for hot reload.
-      - .:/app/src/
-    environment:
-      # Enables autoreload.
-      LITERATURE_PARSER_BACKEND_RELOAD: "True"
-      # Development logging
-      LITERATURE_PARSER_BACKEND_LOG_LEVEL: DEBUG
-      # Development database settings
-      LITERATURE_PARSER_BACKEND_DB_HOST: localhost
-      REDIS_URL: redis://localhost:6379/0
-      GROBID_URL: http://localhost:8070
-      CELERY_BROKER_URL: redis://localhost:6379/0
-      CELERY_RESULT_BACKEND: redis://localhost:6379/0
+      dockerfile: Dockerfile
+    # Override command for development with auto-reload
+    command: poetry run uvicorn literature_parser_backend.web.application:get_app --factory --host 0.0.0.0 --port 8000 --reload
 
   worker:
     build:
       context: .
-      dockerfile: ./Dockerfile
-    volumes:
-      # Adds current directory as volume for hot reload.
-      - .:/app/src/
-    environment:
-      # Development logging
-      LITERATURE_PARSER_BACKEND_LOG_LEVEL: DEBUG
-      # Development database settings
-      LITERATURE_PARSER_BACKEND_DB_HOST: localhost
-      REDIS_URL: redis://localhost:6379/0
-      GROBID_URL: http://localhost:8070
-      CELERY_BROKER_URL: redis://localhost:6379/0
-      CELERY_RESULT_BACKEND: redis://localhost:6379/0
+      dockerfile: Dockerfile
     # Override command for development with auto-reload
     command: poetry run celery -A literature_parser_backend.worker.celery_app worker --loglevel=debug --concurrency=1 --queues=literature
-
-  # Enable development tools by default
-  redis-commander:
-    profiles: []  # Remove dev profile restriction
-
-  mongo-express:
-    profiles: []  # Remove dev profile restriction
+    dns: 8.8.8.8

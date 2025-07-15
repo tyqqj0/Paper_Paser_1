@@ -353,7 +353,7 @@ class LiteratureSummaryDTO(BaseModel):
                 identifiers_dict = self.identifiers.model_dump()
             else:
                 identifiers_dict = self.identifiers
-            
+
             if isinstance(identifiers_dict, dict) and identifiers_dict.get("doi"):
                 self.doi = identifiers_dict["doi"]
 

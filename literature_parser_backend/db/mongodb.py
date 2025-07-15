@@ -50,12 +50,12 @@ async def connect_to_mongodb(
         )
 
         # Get database
-        _database = _client[settings.db_base]
+        _database = _client.get_database()
 
-        # Test connection
-        await _client.admin.command("ping")
+        # Test connection by pinging the specific database
+        await _database.command("ping")
         logger.info(
-            f"Successfully connected to MongoDB at {settings.db_host}:{settings.db_port}",
+            f"Successfully connected to MongoDB at {settings.db_host}:{settings.db_port}, db: {settings.db_base}",
         )
 
         # Create indexes for better performance
@@ -109,32 +109,36 @@ async def create_indexes():
         collection = literature_collection()
 
         # Create indexes for common query patterns
-        indexes = [
-            # Index on DOI for fast lookups
-            ("identifiers.doi", 1),
-            # Index on ArXiv ID
-            ("identifiers.arxiv_id", 1),
-            # Index on fingerprint
-            ("identifiers.fingerprint", 1),
-            # Compound index for title and author searches
+        await collection.create_index(
+            [("identifiers.doi", 1)],
+            name="doi_index",
+            background=True,
+        )
+        await collection.create_index(
+            [("identifiers.arxiv_id", 1)],
+            name="arxiv_id_index",
+            background=True,
+        )
+        await collection.create_index(
+            [("identifiers.fingerprint", 1)],
+            name="fingerprint_index",
+            background=True,
+        )
+        await collection.create_index(
             [("metadata.title", "text"), ("metadata.authors.full_name", "text")],
-            # Index on creation time for sorting
-            ("created_at", -1),
-            # Index on task ID for status queries
-            ("task_info.task_id", 1),
-        ]
-
-        for index in indexes:
-            try:
-                if isinstance(index, list):
-                    # Text index
-                    await collection.create_index(index)
-                else:
-                    # Regular index
-                    await collection.create_index(index)
-                logger.debug(f"Created index: {index}")
-            except Exception as e:
-                logger.warning(f"Failed to create index {index}: {e}")
+            name="text_search_index",
+            background=True,
+        )
+        await collection.create_index(
+            [("created_at", -1)],
+            name="created_at_index",
+            background=True,
+        )
+        await collection.create_index(
+            [("task_info.task_id", 1)],
+            name="task_id_index",
+            background=True,
+        )
 
         logger.info("Successfully created database indexes")
 
@@ -149,11 +153,11 @@ async def health_check() -> bool:
     :return: True if healthy, False otherwise
     """
     try:
-        if _client is None:
+        if _database is None:
             return False
 
-        # Ping the database
-        await _client.admin.command("ping")
+        # Ping the specific database
+        await _database.command("ping")
         return True
 
     except Exception as e:

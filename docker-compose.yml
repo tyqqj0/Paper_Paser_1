@@ -47,7 +47,7 @@ services:
     volumes:
       - literature_parser_backend-db-data:/data/db
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/admin -u literature_parser_backend -p literature_parser_backend --quiet
+      test: echo 'db.runCommand("ping").ok' | mongosh mongodb://literature_parser_backend:literature_parser_backend@localhost:27017/literature_parser?authSource=admin --quiet
       interval: 10s
       timeout: 5s
       retries: 40

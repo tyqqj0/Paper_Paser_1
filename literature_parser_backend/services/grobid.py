@@ -51,7 +51,7 @@ class GrobidClient:
         """
         try:
             response = self.session.get(
-                f"{self.base_url}{self.endpoints['is_alive']}", timeout=self.timeout
+                f"{self.base_url}{self.endpoints['is_alive']}", timeout=self.timeout,
             )
             return (
                 response.status_code == 200 and response.text.strip().lower() == "true"
@@ -69,7 +69,7 @@ class GrobidClient:
         """
         try:
             response = self.session.get(
-                f"{self.base_url}{self.endpoints['version']}", timeout=self.timeout
+                f"{self.base_url}{self.endpoints['version']}", timeout=self.timeout,
             )
             if response.status_code == 200:
                 return response.text.strip()
@@ -127,7 +127,7 @@ class GrobidClient:
 
         try:
             response = self.session.post(
-                url, files=files, data=form_data, timeout=self.timeout
+                url, files=files, data=form_data, timeout=self.timeout,
             )
 
             if response.status_code == 200:
@@ -170,7 +170,7 @@ class GrobidClient:
 
         try:
             response = self.session.post(
-                url, files=files, data=form_data, timeout=self.timeout
+                url, files=files, data=form_data, timeout=self.timeout,
             )
 
             if response.status_code == 200:
@@ -304,7 +304,7 @@ class GrobidClient:
                 if not isinstance(org_names, list):
                     org_names = [org_names]
                 author["affiliations"].extend(
-                    [org.get("#text", "") for org in org_names if org.get("#text")]
+                    [org.get("#text", "") for org in org_names if org.get("#text")],
                 )
             authors.append(author)
         return authors
@@ -324,7 +324,7 @@ class GrobidClient:
                     title = head.get("#text", f"Section {head.get('@n', '')}")
                     paragraphs = [p for p in div.get("p", [])]
                     fulltext["sections"].append(
-                        {"title": title, "paragraphs": paragraphs}
+                        {"title": title, "paragraphs": paragraphs},
                     )
                     fulltext["body"] += "\n".join(paragraphs) + "\n"
         except Exception as e:
@@ -370,7 +370,7 @@ class GrobidClient:
             if imprint:
                 ref["year"] = imprint.get("date", {}).get("@when")
                 ref["volume"] = imprint.get("biblScope", {"@unit": "volume"}).get(
-                    "#text"
+                    "#text",
                 )
                 ref["issue"] = imprint.get("biblScope", {"@unit": "issue"}).get("#text")
                 ref["pages"] = imprint.get("biblScope", {"@unit": "page"}).get("#text")
