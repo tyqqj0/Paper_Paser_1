@@ -428,25 +428,17 @@ async def _process_literature_async(task_id: str, source: Dict[str, Any]) -> str
         # Step 3: Fetch metadata using waterfall approach
         metadata, metadata_raw_data = None, {}
         try:
-            # This would be async in a real implementation
-            # For now, we'll simulate the calls
             update_task_status("正在获取元数据", 30, f"使用{primary_type}标识符")
-            # metadata, metadata_raw_data = await fetch_metadata_waterfall(identifiers, pdf_content)
-
-            # Simulate successful metadata fetch with correct field names
-            title = source.get("title") or source.get("url", "Unknown Title")
-            if not title or title == "":
-                title = "Unknown Title"
             
-            metadata = MetadataModel(
-                title=title,
-                authors=[AuthorModel(full_name="Sample Author", sequence="first")],
-                year=source.get("year", 2024),
-                journal=source.get("journal"),
-                abstract=source.get("abstract"),
-                keywords=source.get("keywords", []),
-                source_priority=["simulated"],
+            # Import and use the real metadata fetcher
+            from .metadata_fetcher import MetadataFetcher
+            
+            fetcher = MetadataFetcher(settings)
+            metadata, metadata_raw_data = await fetcher.fetch_metadata_waterfall(
+                identifiers, primary_type, source
             )
+            
+            logger.info(f"Successfully fetched metadata with title: {metadata.title}")
 
         except Exception as e:
             logger.error(f"Metadata fetching failed: {e}")
@@ -469,30 +461,32 @@ async def _process_literature_async(task_id: str, source: Dict[str, Any]) -> str
         references, references_raw_data = [], {}
         try:
             update_task_status("正在获取参考文献", 60)
-            # references, references_raw_data = await fetch_references_waterfall(identifiers, pdf_content)
-
-            # Simulate some references
-            references = [
-                ReferenceModel(
-                    raw_text="Reference 1: Sample reference paper by Author et al. (2023)",
-                    parsed={
-                        "title": "Reference Paper 1",
-                        "authors": ["Reference Author 1"],
-                        "journal": "Reference Journal",
-                        "year": 2023,
-                    },
-                    source="simulated",
-                ),
-            ]
+            
+            # Import and use the real references fetcher
+            from .references_fetcher import ReferencesFetcher
+            
+            fetcher = ReferencesFetcher(settings)
+            references, references_raw_data = await fetcher.fetch_references_waterfall(
+                identifiers, primary_type, pdf_content
+            )
+            
+            logger.info(f"Successfully fetched {len(references)} references")
 
         except Exception as e:
             logger.error(f"Reference fetching failed: {e}")
+            # Fallback to empty references
+            references = []
+            references_raw_data = {
+                "source": "fallback",
+                "error": str(e),
+                "message": "Reference fetching failed, using empty references"
+            }
 
         # Step 5: Create content model
         update_task_status("正在整合数据", 80)
         url = source.get("url", "")
         content = ContentModel(
-            pdf_url=url if url.endswith(".pdf") else None,
+            pdf_url=url if url and url.endswith(".pdf") else None,
             source_page_url=url if url and not url.endswith(".pdf") else None,
             parsed_fulltext=None,  # Would contain GROBID output if processed
         )
@@ -525,31 +519,17 @@ async def _process_literature_async(task_id: str, source: Dict[str, Any]) -> str
         # Step 8: Save to MongoDB
         update_task_status("正在保存到数据库", 90)
         try:
-            # Use synchronous MongoDB operations to avoid event loop issues
-            logger.info("Saving literature to database using synchronous operations...")
-            from pymongo import MongoClient
+            # Use async MongoDB operations for consistency with API
+            logger.info("Saving literature to database using async operations...")
             
-            # Create synchronous MongoDB client
-            client = MongoClient(
-                host=settings.db_host,
-                port=settings.db_port,
-                username=settings.db_user,
-                password=settings.db_pass,
-                authSource=settings.db_base,
-                serverSelectionTimeoutMS=5000
-            )
+            # Connect to MongoDB
+            await connect_to_mongodb(settings)
             
-            # Get database and collection
-            db = client["literature_parser"]
-            collection = db["literatures"]
-            
-            # Convert literature to dict and insert
-            literature_dict = literature.model_dump(exclude={"id"})
-            result = collection.insert_one(literature_dict)
-            literature_id = str(result.inserted_id)
+            # Use the LiteratureDAO for consistent database operations
+            dao = LiteratureDAO()
+            literature_id = await dao.create_literature(literature)
             
             logger.info(f"Successfully created literature with ID: {literature_id}")
-            client.close()
 
         except Exception as e:
             logger.error(f"Failed to save literature to database: {e}")
@@ -560,7 +540,12 @@ async def _process_literature_async(task_id: str, source: Dict[str, Any]) -> str
 
         update_task_status("任务完成", 100, f"文献ID: {literature_id}")
 
-        return literature_id
+        # Return result in the format expected by the API
+        return {
+            "literature_id": literature_id,
+            "status": "success",
+            "message": f"文献处理完成，ID: {literature_id}"
+        }
 
     except Exception as e:
         logger.error(f"Task failed: {e}", exc_info=True)
