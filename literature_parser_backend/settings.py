@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     db_port: int = 27017
     db_user: str = "literature_parser_backend"
     db_pass: str = "literature_parser_backend"
-    db_base: str = "admin"
+    db_base: str = "literature_parser"
     db_echo: bool = False
 
     # External API settings

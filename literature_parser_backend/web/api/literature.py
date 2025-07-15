@@ -15,6 +15,77 @@ from literature_parser_backend.worker.tasks import process_literature_task
 router = APIRouter(prefix="/literature", tags=["文献处理"])
 
 
+def _extract_convenience_fields(literature) -> dict:
+    """从文献对象中提取便利字段"""
+    convenience_data = {
+        "title": None,
+        "authors": [],
+        "year": None,
+        "journal": None,
+        "doi": None,
+    }
+    
+    # 从identifiers提取DOI
+    if literature.identifiers and literature.identifiers.doi:
+        convenience_data["doi"] = literature.identifiers.doi
+    
+    # 从metadata提取信息
+    if literature.metadata:
+        metadata_dict = literature.metadata.model_dump()
+        
+        # 尝试不同来源的元数据
+        sources = ['crossref', 'semantic_scholar', 'grobid']
+        
+        for source in sources:
+            source_data = metadata_dict.get(source, {})
+            if source_data and isinstance(source_data, dict):
+                # 提取标题
+                if not convenience_data["title"] and source_data.get('title'):
+                    convenience_data["title"] = source_data['title']
+                
+                # 提取年份
+                if not convenience_data["year"]:
+                    year_val = source_data.get('year') or source_data.get('published-online', {}).get('date-parts', [[None]])[0][0]
+                    if year_val:
+                        try:
+                            convenience_data["year"] = int(year_val)
+                        except (ValueError, TypeError):
+                            pass
+                
+                # 提取期刊
+                if not convenience_data["journal"]:
+                    convenience_data["journal"] = (
+                        source_data.get('journal') or 
+                        source_data.get('venue') or
+                        source_data.get('container-title', [None])[0] if isinstance(source_data.get('container-title'), list) else source_data.get('container-title')
+                    )
+                
+                # 提取作者
+                if not convenience_data["authors"]:
+                    authors_data = source_data.get('authors', []) or source_data.get('author', [])
+                    if authors_data:
+                        author_names = []
+                        for author in authors_data:
+                            if isinstance(author, dict):
+                                # 不同格式的作者数据
+                                name = (
+                                    author.get('name') or
+                                    author.get('full_name') or  
+                                    f"{author.get('given', '')} {author.get('family', '')}".strip() or
+                                    author.get('given') or
+                                    author.get('family')
+                                )
+                                if name:
+                                    author_names.append(name)
+                            elif isinstance(author, str):
+                                author_names.append(author)
+                        
+                        if author_names:
+                            convenience_data["authors"] = author_names
+    
+    return convenience_data
+
+
 @router.post("", summary="提交文献处理请求")
 async def create_literature(literature_data: LiteratureCreateDTO):
     """
@@ -111,6 +182,9 @@ async def get_literature_summary(literature_id: str) -> LiteratureSummaryDTO:
                 detail="文献不存在",
             )
 
+        # 手动提取便利字段数据
+        convenience_data = _extract_convenience_fields(literature)
+        
         # 转换为摘要DTO
         summary = LiteratureSummaryDTO(
             id=str(literature.id),
@@ -121,6 +195,12 @@ async def get_literature_summary(literature_id: str) -> LiteratureSummaryDTO:
             task_info=literature.task_info,
             created_at=literature.created_at,
             updated_at=literature.updated_at,
+            # 明确传递便利字段
+            title=convenience_data["title"],
+            authors=convenience_data["authors"],
+            year=convenience_data["year"],
+            journal=convenience_data["journal"],
+            doi=convenience_data["doi"],
         )
 
         logger.info(f"获取文献摘要成功: {literature_id}")
