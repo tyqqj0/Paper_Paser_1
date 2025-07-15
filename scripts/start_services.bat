@@ -1,32 +1,32 @@
 @echo off
 setlocal enabledelayedexpansion
 
-REM Literature Parser Backend - Windows一键启动脚本
-REM 该脚本会启动完整的文献解析生态系统
+REM Literature Parser Backend - Windows One-Click Startup Script
+REM This script will start the complete literature parsing ecosystem
 
 echo.
-echo 🚀 Literature Parser Backend - 一键启动
-echo ========================================
+echo 🚀 Literature Parser Backend - One-Click Startup
+echo ===============================================
 
-REM 检查Docker是否运行
+REM Check if Docker is running
 docker info >nul 2>&1
 if %errorlevel% neq 0 (
-    echo ❌ Docker 未运行，请先启动 Docker Desktop
+    echo ❌ Docker is not running, please start Docker Desktop first
     pause
     exit /b 1
 )
 
-REM 检查Docker Compose是否可用
+REM Check if Docker Compose is available
 docker-compose --version >nul 2>&1
 if %errorlevel% neq 0 (
-    echo ❌ docker-compose 未安装，请先安装 Docker Compose
+    echo ❌ docker-compose is not installed, please install Docker Compose first
     pause
     exit /b 1
 )
 
-REM 创建 .env 文件（如果不存在）
+REM Create .env file (if it doesn't exist)
 if not exist .env (
-    echo 📝 创建 .env 配置文件...
+    echo 📝 Creating .env configuration file...
     (
         echo # Literature Parser Backend Configuration
         echo LITERATURE_PARSER_BACKEND_VERSION=latest
@@ -58,10 +58,10 @@ if not exist .env (
         echo CELERY_TIMEZONE=UTC
         echo CELERY_ENABLE_UTC=True
     ) > .env
-    echo ✅ .env 文件已创建
+    echo ✅ .env file created
 )
 
-REM 检查启动模式
+REM Check startup mode
 set MODE=%1
 if "%MODE%"=="" set MODE=production
 
@@ -70,67 +70,67 @@ if "%MODE%"=="dev" (
 )
 
 if "%MODE%"=="development" (
-    echo 🔧 启动开发环境...
-    echo 包含服务: API, Worker, MongoDB, Redis, GROBID, Redis Commander, Mongo Express
+    echo 🔧 Starting development environment...
+    echo Included services: API, Worker, MongoDB, Redis, GROBID, Redis Commander, Mongo Express
     
-    REM 启动开发环境
+    REM Start development environment
     docker-compose -f docker-compose.yml -f deploy/docker-compose.dev.yml up --build -d
     
     echo.
-    echo 🎉 开发环境启动完成！
+    echo 🎉 Development environment started successfully!
     echo.
-    echo 📋 服务地址:
-    echo   • API 文档:        http://localhost:8000/docs
-    echo   • API 健康检查:    http://localhost:8000/api/health
-    echo   • Redis Commander: http://localhost:8081
-    echo   • Mongo Express:   http://localhost:8082
-    echo   • GROBID:          http://localhost:8070
+    echo 📋 Service addresses:
+    echo   • API Documentation:  http://localhost:8000/docs
+    echo   • API Health Check:   http://localhost:8000/api/health
+    echo   • Redis Commander:    http://localhost:8081
+    echo   • Mongo Express:      http://localhost:8082
+    echo   • GROBID:             http://localhost:8070
     echo.
-    echo 🔍 查看日志: docker-compose logs -f [service_name]
-    echo 🛑 停止服务: docker-compose down
+    echo 🔍 View logs: docker-compose logs -f [service_name]
+    echo 🛑 Stop services: docker-compose down
     
 ) else (
-    echo 🏭 启动生产环境...
-    echo 包含服务: API, Worker, MongoDB, Redis, GROBID
+    echo 🏭 Starting production environment...
+    echo Included services: API, Worker, MongoDB, Redis, GROBID
     
-    REM 启动生产环境
+    REM Start production environment
     docker-compose up --build -d
     
     echo.
-    echo 🎉 生产环境启动完成！
+    echo 🎉 Production environment started successfully!
     echo.
-    echo 📋 服务地址:
-    echo   • API 文档:        http://localhost:8000/docs
-    echo   • API 健康检查:    http://localhost:8000/api/health
+    echo 📋 Service addresses:
+    echo   • API Documentation:  http://localhost:8000/docs
+    echo   • API Health Check:   http://localhost:8000/api/health
     echo.
-    echo 🔍 查看日志: docker-compose logs -f [service_name]
-    echo 🛑 停止服务: docker-compose down
+    echo 🔍 View logs: docker-compose logs -f [service_name]
+    echo 🛑 Stop services: docker-compose down
 )
 
 echo.
-echo ⏳ 等待服务启动完成...
-echo    MongoDB 和 Redis 需要一些时间初始化
-echo    GROBID 首次启动可能需要 1-2 分钟下载模型
+echo ⏳ Waiting for services to start...
+echo    MongoDB and Redis need some time to initialize
+echo    GROBID may take 1-2 minutes to download models on first startup
 
-REM 等待服务健康检查
+REM Wait for service health checks
 echo.
-echo 🔍 检查服务状态...
+echo 🔍 Checking service status...
 timeout /t 10 /nobreak >nul
 
-REM 检查API健康状态
+REM Check API health status
 set /a counter=0
 :check_api
 set /a counter+=1
 curl -s http://localhost:8000/api/health >nul 2>&1
 if %errorlevel% equ 0 (
-    echo ✅ API 服务已就绪
+    echo ✅ API service is ready
     goto check_grobid
 )
 if %counter% geq 30 (
-    echo ⚠️ API 服务启动超时，请检查日志
+    echo ⚠️ API service startup timeout, please check logs
     goto check_grobid
 )
-echo ⏳ 等待 API 服务启动... (%counter%/30)
+echo ⏳ Waiting for API service to start... (%counter%/30)
 timeout /t 5 /nobreak >nul
 goto check_api
 
@@ -140,25 +140,25 @@ set /a counter=0
 set /a counter+=1
 curl -s http://localhost:8070/api/isalive >nul 2>&1
 if %errorlevel% equ 0 (
-    echo ✅ GROBID 服务已就绪
+    echo ✅ GROBID service is ready
     goto finished
 )
 if %counter% geq 30 (
-    echo ⚠️ GROBID 服务启动超时，请检查日志
+    echo ⚠️ GROBID service startup timeout, please check logs
     goto finished
 )
-echo ⏳ 等待 GROBID 服务启动... (%counter%/30)
+echo ⏳ Waiting for GROBID service to start... (%counter%/30)
 timeout /t 5 /nobreak >nul
 goto check_grobid_loop
 
 :finished
 echo.
-echo 🚀 所有服务已启动！可以开始使用文献解析系统了
+echo 🚀 All services are running! You can now start using the literature parsing system
 echo.
-echo 📖 快速测试:
+echo 📖 Quick test:
 echo curl -X POST "http://localhost:8000/api/literature" ^
 echo   -H "Content-Type: application/json" ^
 echo   -d "{\"title\": \"Attention Is All You Need\", \"authors\": [\"Vaswani et al.\"]}"
 echo.
-echo 按任意键退出...
+echo Press any key to exit...
 pause >nul 

@@ -9,7 +9,8 @@ import logging
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
-import httpx
+import requests
+from requests.exceptions import RequestException, Timeout
 
 from ..settings import Settings
 
@@ -38,7 +39,11 @@ class CrossRefClient:
         # Common headers for all requests
         self.headers = {"User-Agent": self.user_agent, "Accept": "application/json"}
 
-    async def get_metadata_by_doi(self, doi: str) -> Optional[Dict[str, Any]]:
+        # Create a persistent session for connection pooling
+        self.session = requests.Session()
+        self.session.headers.update(self.headers)
+
+    def get_metadata_by_doi(self, doi: str) -> Optional[Dict[str, Any]]:
         """
         Retrieve metadata for a publication by DOI.
 
@@ -66,30 +71,26 @@ class CrossRefClient:
         params = {"mailto": self.mailto}
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(url, headers=self.headers, params=params)
+            response = self.session.get(url, params=params, timeout=self.timeout)
 
-                if response.status_code == 200:
-                    data = response.json()
-                    return await self._parse_crossref_work(data.get("message", {}))
-                elif response.status_code == 404:
-                    logger.info(f"DOI {doi} not found in CrossRef")
-                    return None
-                else:
-                    error_msg = (
-                        f"CrossRef API error {response.status_code}: {response.text}"
-                    )
-                    logger.error(error_msg)
-                    raise Exception(error_msg)
+            if response.status_code == 200:
+                data = response.json()
+                return self._parse_crossref_work(data.get("message", {}))
+            elif response.status_code == 404:
+                logger.info(f"DOI {doi} not found in CrossRef")
+                return None
+            else:
+                response.raise_for_status()  # Will raise an HTTPError for other bad statuses
 
-        except httpx.TimeoutException:
+        except Timeout:
             logger.error(f"CrossRef API timeout for DOI: {doi}")
             raise Exception("CrossRef API request timed out")
-        except Exception as e:
+        except RequestException as e:
             logger.error(f"CrossRef API error for DOI {doi}: {e}")
             raise Exception(f"CrossRef API request failed: {e!s}")
+        return None  # Should not be reached, but as a fallback
 
-    async def search_by_title_author(
+    def search_by_title_author(
         self,
         title: str,
         author: Optional[str] = None,
@@ -129,32 +130,25 @@ class CrossRefClient:
             params["filter"] = f"from-pub-date:{year},until-pub-date:{year}"
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(url, headers=self.headers, params=params)
+            response = self.session.get(url, params=params, timeout=self.timeout)
+            response.raise_for_status()
 
-                if response.status_code == 200:
-                    data = response.json()
-                    items = data.get("message", {}).get("items", [])
+            data = response.json()
+            items = data.get("message", {}).get("items", [])
 
-                    results = []
-                    for item in items:
-                        parsed_item = await self._parse_crossref_work(item)
-                        if parsed_item:
-                            results.append(parsed_item)
+            results = []
+            for item in items:
+                parsed_item = self._parse_crossref_work(item)
+                if parsed_item:
+                    results.append(parsed_item)
 
-                    return results
-                else:
-                    error_msg = (
-                        f"CrossRef search error {response.status_code}: {response.text}"
-                    )
-                    logger.error(error_msg)
-                    raise Exception(error_msg)
+            return results
 
-        except Exception as e:
+        except RequestException as e:
             logger.error(f"CrossRef search error: {e}")
             raise Exception(f"CrossRef search failed: {e!s}")
 
-    async def get_multiple_dois(
+    def get_multiple_dois(
         self,
         dois: List[str],
     ) -> Dict[str, Optional[Dict[str, Any]]]:
@@ -172,7 +166,7 @@ class CrossRefClient:
         # Process DOIs individually (CrossRef doesn't have a true batch endpoint)
         for doi in dois:
             try:
-                metadata = await self.get_metadata_by_doi(doi)
+                metadata = self.get_metadata_by_doi(doi)
                 results[doi] = metadata
             except Exception as e:
                 logger.warning(f"Failed to retrieve metadata for DOI {doi}: {e}")
@@ -180,7 +174,7 @@ class CrossRefClient:
 
         return results
 
-    async def _parse_crossref_work(self, work_data: Dict) -> Dict[str, Any]:
+    def _parse_crossref_work(self, work_data: Dict) -> Dict[str, Any]:
         """
         Parse CrossRef work data into our standard format.
 
@@ -255,110 +249,68 @@ class CrossRefClient:
                     parsed["year"] = date_parts[0][0]
 
             # Extract page information
-            if "page" in work_data:
+            if work_data.get("page"):
                 parsed["pages"] = work_data["page"]
 
-            # Extract ISSN/ISBN
-            if "ISSN" in work_data:
+            # Extract ISSN
+            if work_data.get("ISSN"):
                 parsed["issn"] = work_data["ISSN"]
-            if "ISBN" in work_data:
+
+            # Extract ISBN
+            if work_data.get("ISBN"):
                 parsed["isbn"] = work_data["ISBN"]
 
             # Extract license information
-            if "license" in work_data:
-                for license_info in work_data["license"]:
-                    parsed["license"].append(
-                        {
-                            "url": license_info.get("URL"),
-                            "start_date": license_info.get("start", {}).get(
-                                "date-time",
-                            ),
-                            "delay_in_days": license_info.get("delay-in-days"),
-                        },
-                    )
+            if work_data.get("license"):
+                parsed["license"] = work_data["license"]
 
             # Extract funder information
-            if "funder" in work_data:
-                for funder in work_data["funder"]:
-                    funder_info = {
-                        "name": funder.get("name"),
-                        "doi": funder.get("DOI"),
-                        "awards": [],
-                    }
-
-                    if "award" in funder:
-                        funder_info["awards"] = funder["award"]
-
-                    parsed["funder"].append(funder_info)
+            if work_data.get("funder"):
+                parsed["funder"] = work_data["funder"]
 
             return parsed
 
         except Exception as e:
             logger.error(f"Error parsing CrossRef work data: {e}")
-            return {"source": "CrossRef API", "error": str(e), "raw_data": work_data}
+            return {}
 
-    async def check_doi_agency(self, doi: str) -> Optional[str]:
+    def check_doi_agency(self, doi: str) -> Optional[str]:
         """
-        Check which registration agency manages a DOI.
+        Check which agency registered a DOI.
 
         Args:
-            doi: DOI to check
+            doi: The DOI to check
 
         Returns:
-            str: Agency name if found, None otherwise
+            The agency ID if found, otherwise None.
         """
         if not doi:
             return None
 
-        clean_doi = doi.strip()
-        if clean_doi.lower().startswith("doi:"):
-            clean_doi = clean_doi[4:]
-
-        encoded_doi = quote(clean_doi, safe="")
+        encoded_doi = quote(doi.strip(), safe="")
         url = f"{self.base_url}/works/{encoded_doi}/agency"
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(
-                    url,
-                    headers=self.headers,
-                    params={"mailto": self.mailto},
-                )
-
-                if response.status_code == 200:
-                    data = response.json()
-                    agency = data.get("message", {}).get("agency", {})
-                    return agency.get("id")
-
-                return None
-
-        except Exception as e:
-            logger.warning(f"Failed to check DOI agency for {doi}: {e}")
+            response = self.session.get(url, timeout=self.timeout)
+            if response.status_code == 200:
+                return response.json().get("message", {}).get("agency", {}).get("id")
+            return None
+        except RequestException as e:
+            logger.warning(f"Could not check DOI agency for {doi}: {e}")
             return None
 
-    async def get_work_types(self) -> List[Dict[str, Any]]:
+    def get_work_types(self) -> List[Dict[str, Any]]:
         """
-        Get list of available work types from CrossRef.
+        Get a list of all valid work types from CrossRef.
 
         Returns:
-            list: List of work type definitions
+            A list of work types.
         """
         url = f"{self.base_url}/types"
-
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(
-                    url,
-                    headers=self.headers,
-                    params={"mailto": self.mailto},
-                )
-
-                if response.status_code == 200:
-                    data = response.json()
-                    return data.get("message", {}).get("items", [])
-
-                return []
-
-        except Exception as e:
-            logger.warning(f"Failed to get work types: {e}")
+            response = self.session.get(url, timeout=self.timeout)
+            response.raise_for_status()
+            return response.json().get("message", {}).get("items", [])
+        except RequestException as e:
+            logger.error(f"Could not retrieve work types from CrossRef: {e}")
             return []

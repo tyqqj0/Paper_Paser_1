@@ -4,7 +4,9 @@
 """
 
 import time
+
 import requests
+
 from literature_parser_backend.worker.celery_app import celery_app
 from literature_parser_backend.worker.tasks import process_literature_task
 
@@ -56,7 +58,7 @@ def test_task_submission():
         test_data = {"url": "http://example.com/test.pdf", "title": "Test Paper"}
 
         result = process_literature_task.delay(test_data)
-        print(f"✅ 任务提交成功")
+        print("✅ 任务提交成功")
         print(f"   任务ID: {result.id}")
         print(f"   任务状态: {result.status}")
 
@@ -78,7 +80,8 @@ def test_task_monitoring(task_id):
         # 通过API查询任务状态
         for i in range(10):  # 最多检查10次
             response = requests.get(
-                f"http://localhost:8000/api/task/{task_id}", timeout=5
+                f"http://localhost:8000/api/task/{task_id}",
+                timeout=5,
             )
 
             if response.status_code == 200:

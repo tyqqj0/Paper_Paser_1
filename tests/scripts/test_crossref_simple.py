@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-import asyncio
+
 from literature_parser_backend.services.crossref import CrossRefClient
 
-async def test():
+
+def test():
     client = CrossRefClient()
     print("Testing CrossRef API client...")
-    
+
     try:
-        metadata = await client.get_metadata_by_doi("10.1038/nature12373")
+        metadata = client.get_metadata_by_doi("10.1038/nature12373")
         if metadata:
             print("SUCCESS: Got metadata")
             print(f"Title: {metadata.get('title', 'N/A')}")
@@ -22,6 +23,7 @@ async def test():
         print(f"ERROR: {e}")
         return False
 
+
 if __name__ == "__main__":
-    result = asyncio.run(test())
-    print(f"Test result: {'PASS' if result else 'FAIL'}") 
+    result = test()
+    print(f"Test result: {'PASS' if result else 'FAIL'}")

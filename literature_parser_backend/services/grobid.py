@@ -8,8 +8,9 @@ to extract metadata and fulltext from PDF documents.
 import logging
 from typing import Any, Dict, Optional
 
-import httpx
+import requests
 import xmltodict
+from requests.exceptions import RequestException, Timeout
 
 from ..settings import Settings
 
@@ -39,8 +40,9 @@ class GrobidClient:
             "version": "/api/version",
             "is_alive": "/api/isalive",
         }
+        self.session = requests.Session()
 
-    async def health_check(self) -> bool:
+    def health_check(self) -> bool:
         """
         Check if GROBID service is alive and responding.
 
@@ -48,19 +50,17 @@ class GrobidClient:
             bool: True if service is healthy, False otherwise
         """
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(
-                    f"{self.base_url}{self.endpoints['is_alive']}",
-                )
-                return (
-                    response.status_code == 200
-                    and response.text.strip().lower() == "true"
-                )
-        except Exception as e:
+            response = self.session.get(
+                f"{self.base_url}{self.endpoints['is_alive']}", timeout=self.timeout
+            )
+            return (
+                response.status_code == 200 and response.text.strip().lower() == "true"
+            )
+        except RequestException as e:
             logger.error(f"GROBID health check failed: {e}")
             return False
 
-    async def get_version(self) -> Optional[str]:
+    def get_version(self) -> Optional[str]:
         """
         Get GROBID service version.
 
@@ -68,18 +68,17 @@ class GrobidClient:
             str: Version string if successful, None otherwise
         """
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(
-                    f"{self.base_url}{self.endpoints['version']}",
-                )
-                if response.status_code == 200:
-                    return response.text.strip()
-                return None
-        except Exception as e:
+            response = self.session.get(
+                f"{self.base_url}{self.endpoints['version']}", timeout=self.timeout
+            )
+            if response.status_code == 200:
+                return response.text.strip()
+            return None
+        except RequestException as e:
             logger.error(f"Failed to get GROBID version: {e}")
             return None
 
-    async def process_pdf(
+    def process_pdf(
         self,
         pdf_file: bytes,
         include_raw_citations: bool = True,
@@ -127,36 +126,31 @@ class GrobidClient:
         url = f"{self.base_url}{self.endpoints['process_fulltext']}"
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(url, files=files, data=form_data)
+            response = self.session.post(
+                url, files=files, data=form_data, timeout=self.timeout
+            )
 
-                if response.status_code == 200:
-                    # GROBID returns TEI XML format
-                    xml_content = response.text
-                    return await self._parse_tei_xml(xml_content)
-                elif response.status_code == 204:
-                    logger.warning(
-                        "GROBID processing completed but no content extracted",
-                    )
-                    return {"status": "no_content", "message": "No content extracted"}
-                elif response.status_code == 503:
-                    logger.warning("GROBID service temporarily unavailable (503)")
-                    raise Exception(
-                        "GROBID service temporarily unavailable. Please retry later.",
-                    )
-                else:
-                    error_msg = f"GROBID processing failed with status {response.status_code}: {response.text}"
-                    logger.error(error_msg)
-                    raise Exception(error_msg)
+            if response.status_code == 200:
+                # GROBID returns TEI XML format
+                xml_content = response.text
+                return self._parse_tei_xml(xml_content)
+            elif response.status_code == 204:
+                logger.warning(
+                    "GROBID processing completed but no content extracted",
+                )
+                return {"status": "no_content", "message": "No content extracted"}
+            else:
+                response.raise_for_status()
 
-        except httpx.TimeoutException:
+        except Timeout:
             logger.error("GROBID request timed out")
             raise Exception("GROBID processing timed out")
-        except Exception as e:
+        except RequestException as e:
             logger.error(f"GROBID processing error: {e}")
             raise Exception(f"GROBID processing failed: {e!s}")
+        return {}
 
-    async def process_header_only(self, pdf_file: bytes) -> Dict[str, Any]:
+    def process_header_only(self, pdf_file: bytes) -> Dict[str, Any]:
         """
         Extract only header metadata from PDF using GROBID.
 
@@ -175,20 +169,22 @@ class GrobidClient:
         url = f"{self.base_url}{self.endpoints['process_header']}"
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(url, files=files, data=form_data)
+            response = self.session.post(
+                url, files=files, data=form_data, timeout=self.timeout
+            )
 
-                if response.status_code == 200:
-                    xml_content = response.text
-                    return await self._parse_tei_xml(xml_content)
-                else:
-                    raise Exception(f"Header processing failed: {response.status_code}")
+            if response.status_code == 200:
+                xml_content = response.text
+                return self._parse_tei_xml(xml_content)
+            else:
+                response.raise_for_status()
 
-        except Exception as e:
+        except RequestException as e:
             logger.error(f"GROBID header processing error: {e}")
             raise Exception(f"Header processing failed: {e!s}")
+        return {}
 
-    async def _parse_tei_xml(self, xml_content: str) -> Dict[str, Any]:
+    def _parse_tei_xml(self, xml_content: str) -> Dict[str, Any]:
         """
         Parse TEI XML response from GROBID into structured data.
 
@@ -217,13 +213,13 @@ class GrobidClient:
             # Extract header information
             tei_header = tei_root.get("teiHeader", {})
             if tei_header:
-                result["metadata"] = await self._extract_header_metadata(tei_header)
+                result["metadata"] = self._extract_header_metadata(tei_header)
 
             # Extract body text
             text_element = tei_root.get("text", {})
             if text_element:
-                result["fulltext"] = await self._extract_fulltext(text_element)
-                result["references"] = await self._extract_references(text_element)
+                result["fulltext"] = self._extract_fulltext(text_element)
+                result["references"] = self._extract_references(text_element)
 
             # Store complete parsed structure for advanced usage
             result["parsed_data"] = tei_root
@@ -234,7 +230,7 @@ class GrobidClient:
             logger.error(f"TEI XML parsing error: {e}")
             return {"status": "parse_error", "error": str(e), "raw_xml": xml_content}
 
-    async def _extract_header_metadata(self, tei_header: Dict) -> Dict[str, Any]:
+    def _extract_header_metadata(self, tei_header: Dict) -> Dict[str, Any]:
         """Extract metadata from TEI header."""
         metadata = {}
 
@@ -249,157 +245,134 @@ class GrobidClient:
                     title.get("#text", title) if isinstance(title, dict) else title
                 )
 
-            # Extract author information
+            # Extract authors
             source_desc = file_desc.get("sourceDesc", {})
             if source_desc:
-                # Extract authors and affiliations
-                metadata["authors"] = await self._extract_authors(source_desc)
+                bibl_struct = source_desc.get("biblStruct", {})
+                if bibl_struct and "analytic" in bibl_struct:
+                    metadata["authors"] = self._extract_authors(bibl_struct["analytic"])
 
-            # Extract publication info
-            publication_stmt = file_desc.get("publicationStmt", {})
-            if publication_stmt:
-                metadata["publication_info"] = publication_stmt
+            # Extract abstract
+            profile_desc = tei_header.get("profileDesc", {})
+            if profile_desc and "abstract" in profile_desc:
+                abstract_text = profile_desc["abstract"].get("#text", "")
+                metadata["abstract"] = abstract_text
+
+            # Extract keywords
+            if profile_desc and "textClass" in profile_desc:
+                keywords = []
+                terms = profile_desc["textClass"].get("keywords", {}).get("term", [])
+                if isinstance(terms, list):
+                    keywords.extend(terms)
+                elif terms:
+                    keywords.append(terms)
+                metadata["keywords"] = keywords
 
         except Exception as e:
-            logger.warning(f"Error extracting header metadata: {e}")
+            logger.error(f"Error extracting header metadata from TEI: {e}")
 
         return metadata
 
-    async def _extract_authors(self, source_desc: Dict) -> list:
-        """Extract author information from source description."""
+    def _extract_authors(self, analytic: Dict) -> list:
+        """Extract authors from TEI analytic section."""
         authors = []
+        author_list = analytic.get("author", [])
+        if not isinstance(author_list, list):
+            author_list = [author_list]
 
-        try:
-            # GROBID places author info in different possible locations
-            bibl = source_desc.get("biblStruct", {}).get("analytic", {})
-            if "author" in bibl:
-                author_data = bibl["author"]
-                if not isinstance(author_data, list):
-                    author_data = [author_data]
+        for author_node in author_list:
+            pers_name = author_node.get("persName", {})
+            if not pers_name:
+                continue
 
-                for author in author_data:
-                    author_info = {}
-                    pers_name = author.get("persName", {})
+            author = {
+                "full_name": "",
+                "given_name": pers_name.get("forename", {}).get("#text", ""),
+                "surname": pers_name.get("surname", ""),
+                "email": author_node.get("email", ""),
+                "affiliations": [],
+            }
+            author["full_name"] = f"{author['given_name']} {author['surname']}".strip()
 
-                    if "forename" in pers_name:
-                        forenames = pers_name["forename"]
-                        if not isinstance(forenames, list):
-                            forenames = [forenames]
-                        author_info["given_names"] = [
-                            f.get("#text", f) if isinstance(f, dict) else f
-                            for f in forenames
-                        ]
+            # Extract affiliations
+            aff_nodes = author_node.get("affiliation", [])
+            if not isinstance(aff_nodes, list):
+                aff_nodes = [aff_nodes]
 
-                    if "surname" in pers_name:
-                        surname = pers_name["surname"]
-                        author_info["family_name"] = (
-                            surname.get("#text", surname)
-                            if isinstance(surname, dict)
-                            else surname
-                        )
-
-                    # Extract affiliations if present
-                    if "affiliation" in author:
-                        author_info["affiliations"] = author["affiliation"]
-
-                    authors.append(author_info)
-
-        except Exception as e:
-            logger.warning(f"Error extracting authors: {e}")
-
+            for aff_node in aff_nodes:
+                org_names = aff_node.get("orgName", [])
+                if not isinstance(org_names, list):
+                    org_names = [org_names]
+                author["affiliations"].extend(
+                    [org.get("#text", "") for org in org_names if org.get("#text")]
+                )
+            authors.append(author)
         return authors
 
-    async def _extract_fulltext(self, text_element: Dict) -> Dict[str, Any]:
-        """Extract fulltext content from TEI text element."""
-        fulltext = {}
-
+    def _extract_fulltext(self, text_element: Dict) -> Dict[str, Any]:
+        """Extract fulltext from TEI body."""
+        fulltext = {"body": "", "sections": []}
         try:
             body = text_element.get("body", {})
             if body:
-                fulltext["body"] = body
+                divs = body.get("div", [])
+                if not isinstance(divs, list):
+                    divs = [divs]
 
-            # Extract structured sections if available
-            if "div" in body:
-                fulltext["sections"] = body["div"]
-
+                for div in divs:
+                    head = div.get("head", {})
+                    title = head.get("#text", f"Section {head.get('@n', '')}")
+                    paragraphs = [p for p in div.get("p", [])]
+                    fulltext["sections"].append(
+                        {"title": title, "paragraphs": paragraphs}
+                    )
+                    fulltext["body"] += "\n".join(paragraphs) + "\n"
         except Exception as e:
-            logger.warning(f"Error extracting fulltext: {e}")
-
+            logger.error(f"Error extracting fulltext from TEI: {e}")
         return fulltext
 
-    async def _extract_references(self, text_element: Dict) -> list:
-        """Extract references from TEI text element."""
+    def _extract_references(self, text_element: Dict) -> list:
+        """Extract references from TEI back section."""
         references = []
-
         try:
             back = text_element.get("back", {})
-            if back and "div" in back:
-                div_elements = back["div"]
-                if not isinstance(div_elements, list):
-                    div_elements = [div_elements]
+            if back:
+                div = back.get("div", {})
+                if div and div.get("@type") == "references":
+                    bibl_list = div.get("listBibl", {}).get("biblStruct", [])
+                    if not isinstance(bibl_list, list):
+                        bibl_list = [bibl_list]
 
-                for div in div_elements:
-                    if div.get("@type") == "references":
-                        list_bibl = div.get("listBibl", {})
-                        if "biblStruct" in list_bibl:
-                            bibl_structs = list_bibl["biblStruct"]
-                            if not isinstance(bibl_structs, list):
-                                bibl_structs = [bibl_structs]
-
-                            for bibl in bibl_structs:
-                                ref_data = await self._parse_reference(bibl)
-                                if ref_data:
-                                    references.append(ref_data)
-
+                    for bibl in bibl_list:
+                        ref = self._parse_reference(bibl)
+                        if ref:
+                            references.append(ref)
         except Exception as e:
-            logger.warning(f"Error extracting references: {e}")
-
+            logger.error(f"Error extracting references from TEI: {e}")
         return references
 
-    async def _parse_reference(self, bibl_struct: Dict) -> Optional[Dict]:
-        """Parse a single bibliographic reference."""
-        try:
-            ref_data = {"type": "grobid_parsed"}
-
-            # Extract analytic part (article info)
-            analytic = bibl_struct.get("analytic", {})
-            if analytic:
-                if "title" in analytic:
-                    title = analytic["title"]
-                    ref_data["title"] = (
-                        title.get("#text", title) if isinstance(title, dict) else title
-                    )
-
-                # Extract authors
-                if "author" in analytic:
-                    ref_data["authors"] = await self._extract_authors(
-                        {"biblStruct": {"analytic": analytic}},
-                    )
-
-            # Extract monographic part (journal/book info)
-            monogr = bibl_struct.get("monogr", {})
-            if monogr:
-                if "title" in monogr:
-                    title = monogr["title"]
-                    container_title = (
-                        title.get("#text", title) if isinstance(title, dict) else title
-                    )
-                    ref_data["container_title"] = container_title
-
-                # Extract publication details
-                imprint = monogr.get("imprint", {})
-                if imprint:
-                    if "date" in imprint:
-                        ref_data["publication_date"] = imprint["date"]
-                    if "biblScope" in imprint:
-                        ref_data["publication_info"] = imprint["biblScope"]
-
-            return (
-                ref_data
-                if ref_data.get("title") or ref_data.get("container_title")
-                else None
-            )
-
-        except Exception as e:
-            logger.warning(f"Error parsing reference: {e}")
+    def _parse_reference(self, bibl_struct: Dict) -> Optional[Dict]:
+        """Parse a single biblStruct into a structured reference."""
+        if not bibl_struct:
             return None
+
+        ref = {"raw_text": bibl_struct.get("@id", "")}
+
+        analytic = bibl_struct.get("analytic", {})
+        if analytic:
+            ref["title"] = analytic.get("title", {}).get("#text")
+            ref["authors"] = self._extract_authors(analytic)
+
+        monogr = bibl_struct.get("monogr", {})
+        if monogr:
+            ref["journal"] = monogr.get("title", {}).get("#text")
+            imprint = monogr.get("imprint", {})
+            if imprint:
+                ref["year"] = imprint.get("date", {}).get("@when")
+                ref["volume"] = imprint.get("biblScope", {"@unit": "volume"}).get(
+                    "#text"
+                )
+                ref["issue"] = imprint.get("biblScope", {"@unit": "issue"}).get("#text")
+                ref["pages"] = imprint.get("biblScope", {"@unit": "page"}).get("#text")
+
+        return ref

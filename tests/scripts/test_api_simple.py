@@ -3,9 +3,10 @@
 Simple script to test if the Literature Parser API is working.
 """
 
-import requests
 import json
 import time
+
+import requests
 
 
 def test_api_health():
@@ -58,7 +59,9 @@ def test_literature_submission():
         }
 
         response = requests.post(
-            "http://localhost:8000/api/literature", json=test_literature, timeout=10
+            "http://localhost:8000/api/literature",
+            json=test_literature,
+            timeout=10,
         )
 
         print(f"✅ Literature Submission Status: {response.status_code}")
