@@ -1,5 +1,5 @@
 services:
-  api: &main_app
+  api:
     build:
       context: .
       dockerfile: ./Dockerfile
@@ -12,36 +12,19 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    environment:
-      # App configuration
-      LITERATURE_PARSER_BACKEND_HOST: 0.0.0.0
-      LITERATURE_PARSER_BACKEND_PORT: 8000
-      LITERATURE_PARSER_BACKEND_WORKERS_COUNT: 1
-      LITERATURE_PARSER_BACKEND_LOG_LEVEL: INFO
-      # Database configuration (no auth for development)
-      LITERATURE_PARSER_BACKEND_DB_HOST: db
-      LITERATURE_PARSER_BACKEND_DB_PORT: 27017
-      LITERATURE_PARSER_BACKEND_DB_USER: ""
-      LITERATURE_PARSER_BACKEND_DB_PASS: ""
-      LITERATURE_PARSER_BACKEND_DB_BASE: literature_parser
-      # Redis configuration
-      LITERATURE_PARSER_BACKEND_REDIS_HOST: redis
-      LITERATURE_PARSER_BACKEND_REDIS_PORT: 6379
-      LITERATURE_PARSER_BACKEND_REDIS_DB: 0
-      LITERATURE_PARSER_BACKEND_REDIS_PASSWORD: ""
-      # External services
-      LITERATURE_PARSER_BACKEND_GROBID_BASE_URL: http://grobid:8070
-      LITERATURE_PARSER_BACKEND_CROSSREF_MAILTO: literature-parser@example.com
-      # Celery configuration
-      LITERATURE_PARSER_BACKEND_CELERY_BROKER_URL: redis://redis:6379/0
-      LITERATURE_PARSER_BACKEND_CELERY_RESULT_BACKEND: redis://redis:6379/0
     networks:
       - literature_parser_network
     ports:
       - "8000:8000"
 
   worker:
-    <<: *main_app
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    image: literature_parser_backend:${LITERATURE_PARSER_BACKEND_VERSION:-latest}
+    restart: always
+    env_file:
+      - .env
     command: poetry run celery -A literature_parser_backend.worker.celery_app worker --loglevel=info --concurrency=2 --queues=literature
     depends_on:
       db:
@@ -50,25 +33,6 @@ services:
         condition: service_healthy
       grobid:
         condition: service_started
-    ports: []  # Worker doesn't need exposed ports
-    environment:
-      # Database configuration (no auth for development)
-      DB_HOST: db
-      DB_PORT: 27017
-      DB_USER: ""
-      DB_PASS: ""
-      DB_BASE: literature_parser
-      # Redis configuration
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_DB: 0
-      REDIS_PASSWORD: ""
-      # External services
-      GROBID_BASE_URL: http://grobid:8070
-      CROSSREF_MAILTO: literature-parser@example.com
-      # Celery configuration
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
     networks:
       - literature_parser_network
 
@@ -83,7 +47,7 @@ services:
     volumes:
       - literature_parser_backend-db-data:/data/db
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/admin -u literature_parser_backend -p literature_parser_backend --quiet
       interval: 10s
       timeout: 5s
       retries: 40

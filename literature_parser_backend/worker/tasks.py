@@ -406,6 +406,9 @@ async def _process_literature_async(task_id: str, source: Dict[str, Any]) -> str
         update_task_status("正在初始化任务", 5, "解析输入数据")
 
         # Process source data
+        logger.info(f"Processing literature from source: {source}")
+        logger.info(f"Source type: {type(source)}")
+        logger.info(f"Source keys: {list(source.keys()) if isinstance(source, dict) else 'Not a dict'}")
         logger.info(
             f"Processing literature from source: {source.get('url') or source.get('doi') or 'file upload'}",
         )
@@ -430,33 +433,36 @@ async def _process_literature_async(task_id: str, source: Dict[str, Any]) -> str
             update_task_status("正在获取元数据", 30, f"使用{primary_type}标识符")
             # metadata, metadata_raw_data = await fetch_metadata_waterfall(identifiers, pdf_content)
 
-            # Simulate successful metadata fetch
+            # Simulate successful metadata fetch with correct field names
+            title = source.get("title") or source.get("url", "Unknown Title")
+            if not title or title == "":
+                title = "Unknown Title"
+            
             metadata = MetadataModel(
-                title=source.get("title", "Sample Literature Title"),
+                title=title,
                 authors=[AuthorModel(full_name="Sample Author", sequence="first")],
-                abstract=source.get("abstract", ""),
-                publication_year=source.get("year", 2024),
-                publication_date=source.get("date"),
-                journal=source.get("journal", ""),
-                volume=source.get("volume"),
-                issue=source.get("issue"),
-                pages=source.get("pages"),
-                publisher=source.get("publisher"),
-                language="en",
+                year=source.get("year", 2024),
+                journal=source.get("journal"),
+                abstract=source.get("abstract"),
                 keywords=source.get("keywords", []),
-                citation_count=0,
+                source_priority=["simulated"],
             )
 
         except Exception as e:
             logger.error(f"Metadata fetching failed: {e}")
-            # Create minimal metadata
+            # Create minimal metadata with correct field names
+            title = source.get("title") or source.get("url", "Unknown Title")
+            if not title or title == "":
+                title = "Unknown Title"
+                
             metadata = MetadataModel(
-                title=source.get("title", "Unknown Title"),
+                title=title,
                 authors=[],
-                abstract="",
-                publication_year=2024,
-                language="en",
+                year=2024,
+                journal=None,
+                abstract=None,
                 keywords=[],
+                source_priority=["fallback"],
             )
 
         # Step 4: Fetch references using waterfall approach
@@ -519,16 +525,31 @@ async def _process_literature_async(task_id: str, source: Dict[str, Any]) -> str
         # Step 8: Save to MongoDB
         update_task_status("正在保存到数据库", 90)
         try:
-            # Ensure database connection for this worker process
-            logger.info("Initializing database connection for worker...")
-            await connect_to_mongodb(settings)
-            logger.info("Database connection established in worker")
-
-            # Create DAO and save literature
-            literature_dao = LiteratureDAO()
-            literature_id = await literature_dao.create_literature(literature)
-
+            # Use synchronous MongoDB operations to avoid event loop issues
+            logger.info("Saving literature to database using synchronous operations...")
+            from pymongo import MongoClient
+            
+            # Create synchronous MongoDB client
+            client = MongoClient(
+                host=settings.db_host,
+                port=settings.db_port,
+                username=settings.db_user,
+                password=settings.db_pass,
+                authSource=settings.db_base,
+                serverSelectionTimeoutMS=5000
+            )
+            
+            # Get database and collection
+            db = client["literature_parser"]
+            collection = db["literatures"]
+            
+            # Convert literature to dict and insert
+            literature_dict = literature.model_dump(exclude={"id"})
+            result = collection.insert_one(literature_dict)
+            literature_id = str(result.inserted_id)
+            
             logger.info(f"Successfully created literature with ID: {literature_id}")
+            client.close()
 
         except Exception as e:
             logger.error(f"Failed to save literature to database: {e}")
