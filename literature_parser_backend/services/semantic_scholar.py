@@ -281,7 +281,7 @@ class SemanticScholarClient:
                 "reference_count": paper_data.get("referenceCount"),
                 "citation_count": paper_data.get("citationCount"),
                 "influential_citation_count": paper_data.get(
-                    "influentialCitationCount"
+                    "influentialCitationCount",
                 ),
                 "is_open_access": paper_data.get("isOpenAccess"),
                 "open_access_pdf": (paper_data.get("openAccessPdf") or {}).get("url"),
@@ -312,6 +312,6 @@ class SemanticScholarClient:
                 {
                     "author_id": author.get("authorId"),
                     "name": author.get("name"),
-                }
+                },
             )
         return parsed_authors

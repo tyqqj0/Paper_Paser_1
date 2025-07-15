@@ -65,7 +65,7 @@ filterwarnings = [
 ]
 env = [
     "LITERATURE_PARSER_BACKEND_ENVIRONMENT=pytest",
-    "LITERATURE_PARSER_BACKEND_DB_BASE=admin",
+    "LITERATURE_PARSER_BACKEND_DB_BASE=literature_parser",
 ]
 
 [tool.ruff]

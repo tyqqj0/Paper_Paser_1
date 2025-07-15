@@ -185,7 +185,7 @@ class ContentFetcher:
                 content = response.content
                 if content.startswith(b"%PDF"):
                     logger.info(
-                        f"Successfully downloaded PDF: {len(content)} bytes from {url}"
+                        f"Successfully downloaded PDF: {len(content)} bytes from {url}",
                     )
                     return content
                 else:
@@ -250,9 +250,23 @@ class ContentFetcher:
             logger.error(f"Error parsing PDF with GROBID: {e}")
             raw_data["grobid_parsing"] = f"error: {e}"
 
+    def fetch_pdf_from_arxiv_id(self, arxiv_id: str) -> Optional[bytes]:
+        """
+        Fetch a PDF directly from an ArXiv ID.
+
+        Args:
+            arxiv_id: The ArXiv identifier.
+
+        Returns:
+            PDF content as bytes or None if failed.
+        """
+        pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+        logger.info(f"Attempting to download PDF from ArXiv URL: {pdf_url}")
+        return self._download_pdf(pdf_url)
+
     def _extract_fulltext_from_grobid(self, grobid_data: Dict[str, Any]) -> str:
         """
-        Extract readable fulltext from GROBID parsing result.
+        Extract structured fulltext from GROBID's TEI XML output.
 
         Args:
             grobid_data: GROBID parsing result
