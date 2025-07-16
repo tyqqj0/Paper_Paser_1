@@ -7,7 +7,7 @@ This module contains:
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, ClassVar, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -25,7 +25,7 @@ class AuthorModel(BaseModel):
     s2_id: Optional[str] = Field(None, description="Semantic Scholar Author ID")
 
     class Config:
-        json_schema_extra = {
+        json_schema_extra: ClassVar[Dict[str, Any]] = {
             "example": {"name": "Ashish Vaswani", "s2_id": "1738948"},
         }
 
@@ -33,12 +33,15 @@ class AuthorModel(BaseModel):
 class IdentifiersModel(BaseModel):
     """Collection of authoritative identifiers for a literature."""
 
-    doi: Optional[str] = Field(None, description="Digital Object Identifier")
-    arxiv_id: Optional[str] = Field(None, description="ArXiv identifier")
-    fingerprint: Optional[str] = Field(None, description="Content-based fingerprint")
+    doi: Optional[str] = Field(default=None, description="Digital Object Identifier")
+    arxiv_id: Optional[str] = Field(default=None, description="ArXiv identifier")
+    fingerprint: Optional[str] = Field(
+        default=None,
+        description="Content-based fingerprint",
+    )
 
     class Config:
-        json_schema_extra = {
+        json_schema_extra: ClassVar[Dict[str, Any]] = {
             "example": {
                 "doi": "10.48550/arXiv.1706.03762",
                 "arxiv_id": "1706.03762",
@@ -65,7 +68,7 @@ class MetadataModel(BaseModel):
     )
 
     class Config:
-        json_schema_extra = {
+        json_schema_extra: ClassVar[Dict[str, Any]] = {
             "example": {
                 "title": "Attention Is All You Need",
                 "authors": [
@@ -85,18 +88,23 @@ class ContentModel(BaseModel):
     """Literature content and parsing information."""
 
     pdf_url: Optional[str] = Field(default=None, description="URL to the PDF file")
-    source_page_url: Optional[str] = Field(default=None, description="Original source page URL")
+    source_page_url: Optional[str] = Field(
+        default=None,
+        description="Original source page URL",
+    )
     parsed_fulltext: Optional[Dict[str, Any]] = Field(
         default=None,
-        description="GROBID parsed fulltext (large JSON object, excluded from summary APIs)",
+        description=(
+            "GROBID parsed fulltext (large JSON object, excluded from summary APIs)"
+        ),
     )
     sources_tried: List[str] = Field(
         default_factory=list,
-        description="List of URLs or methods tried for content fetching.",
+        description="List of sources tried for content fetching",
     )
 
     class Config:
-        json_schema_extra = {
+        json_schema_extra: ClassVar[Dict[str, Any]] = {
             "example": {
                 "pdf_url": "https://my-oss.com/1706.03762.pdf",
                 "source_page_url": "https://arxiv.org/abs/1706.03762",
@@ -120,9 +128,12 @@ class ReferenceModel(BaseModel):
     source: str = Field(..., description="Source of this reference parsing")
 
     class Config:
-        json_schema_extra = {
+        json_schema_extra: ClassVar[Dict[str, Any]] = {
             "example": {
-                "raw_text": "Y. Bengio, et al. A neural probabilistic language model. JMLR, 2003.",
+                "raw_text": (
+                    "Y. Bengio, et al. A neural probabilistic language model. "
+                    "JMLR, 2003."
+                ),
                 "parsed": {
                     "title": "A neural probabilistic language model",
                     "year": 2003,
@@ -171,7 +182,8 @@ class LiteratureModel(BaseModel):
     identifiers: IdentifiersModel = Field(..., description="Authoritative identifiers")
     metadata: MetadataModel = Field(..., description="Literature metadata")
     content: ContentModel = Field(
-        default_factory=lambda: ContentModel(), description="Content and parsing data"
+        default_factory=lambda: ContentModel(),
+        description="Content and parsing data",
     )
     references: List[ReferenceModel] = Field(
         default_factory=list,
@@ -193,8 +205,11 @@ class LiteratureModel(BaseModel):
     class Config:
         populate_by_name = True
         arbitrary_types_allowed = True
-        json_encoders = {datetime: lambda v: v.isoformat(), PyObjectId: str}
-        json_schema_extra = {
+        json_encoders: ClassVar[Dict[Any, Any]] = {
+            datetime: lambda v: v.isoformat(),
+            PyObjectId: str,
+        }
+        json_schema_extra: ClassVar[Dict[str, Any]] = {
             "example": {
                 "_id": "507f1f77bcf86cd799439011",
                 "user_id": "507f1f77bcf86cd799439012",
@@ -243,16 +258,14 @@ class LiteratureSourceDTO(BaseModel):
         }
 
 
-class LiteratureCreateDTO(BaseModel):
-    """Request DTO for creating a new literature."""
+class LiteratureCreateRequestDTO(BaseModel):
+    """Request DTO for creating a new literature. Handles nested source."""
 
-    # 支持直接传入字段或通过source对象
     source: Optional[LiteratureSourceDTO] = Field(
         None,
         description="Source information for the literature",
     )
 
-    # 直接字段支持（向后兼容）
     doi: Optional[str] = Field(None, description="Digital Object Identifier")
     arxiv_id: Optional[str] = Field(None, description="ArXiv identifier")
     url: Optional[str] = Field(None, description="URL to the literature")
@@ -271,23 +284,24 @@ class LiteratureCreateDTO(BaseModel):
                 "title": self.title or self.source.title,
                 "authors": self.authors or self.source.authors,
             }
-        else:
-            return {
-                "doi": self.doi,
-                "arxiv_id": self.arxiv_id,
-                "url": self.url,
-                "pdf_url": self.pdf_url,
-                "title": self.title,
-                "authors": self.authors,
-            }
+        return {
+            "doi": self.doi,
+            "arxiv_id": self.arxiv_id,
+            "url": self.url,
+            "pdf_url": self.pdf_url,
+            "title": self.title,
+            "authors": self.authors,
+        }
 
     class Config:
-        json_schema_extra = {
+        json_schema_extra: ClassVar[Dict[str, Any]] = {
             "example": {
-                "title": "Attention Is All You Need",
-                "authors": ["Ashish Vaswani", "Noam Shazeer"],
-                "doi": "10.48550/arXiv.1706.03762",
-                "url": "https://arxiv.org/abs/1706.03762",
+                "source": {
+                    "doi": "10.48550/arXiv.1706.03762",
+                    "url": "https://arxiv.org/abs/1706.03762",
+                    "title": "Attention Is All You Need",
+                    "authors": ["Ashish Vaswani", "Noam Shazeer"],
+                },
             },
         }
 
@@ -299,7 +313,7 @@ class LiteratureCreatedResponseDTO(BaseModel):
     resource_url: str = Field(..., description="URL to access the literature")
 
     class Config:
-        json_schema_extra = {
+        json_schema_extra: ClassVar[Dict[str, Any]] = {
             "example": {
                 "literature_id": "lit_abc123",
                 "resource_url": "/api/v1/literatures/lit_abc123",
@@ -314,7 +328,7 @@ class LiteratureTaskCreatedResponseDTO(BaseModel):
     status_url: str = Field(..., description="URL to check task status")
 
     class Config:
-        json_schema_extra = {
+        json_schema_extra: ClassVar[Dict[str, Any]] = {
             "example": {
                 "task_id": "a1b2-c3d4-e5f6-g7h8",
                 "status_url": "/api/v1/tasks/a1b2-c3d4-e5f6-g7h8",
@@ -342,7 +356,7 @@ class LiteratureSummaryDTO(BaseModel):
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
 
-    # 便利字段 - 从metadata中提取的信息，便于前端使用
+    # 便利字段 - 从metadata中提取的信息,便于前端使用
     title: Optional[str] = None
     authors: List[str] = Field(default_factory=list)
     year: Optional[int] = None
@@ -352,25 +366,56 @@ class LiteratureSummaryDTO(BaseModel):
     def model_post_init(self, __context: Any) -> None:
         """
         Populate convenience fields after the model is initialized.
+
         This is a Pydantic V2 feature that replaces @root_validator.
         """
         if self.metadata:
             self.title = self.metadata.title
-            self.authors = [author.name for author in self.metadata.authors]
             self.year = self.metadata.year
             self.journal = self.metadata.journal
-        if self.identifiers:
+            if self.metadata.authors:
+                self.authors = [author.name for author in self.metadata.authors]
+
+        if self.identifiers and self.identifiers.doi:
             self.doi = self.identifiers.doi
 
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert the model to a dictionary."""
-        # This is a simplified conversion, you might want to customize it
-        return self.model_dump(by_alias=True)
+    def _populate_convenience_fields(self) -> None:
+        """
+        Manually populate convenience fields.
 
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "LiteratureSummaryDTO":
-        """Create a model from a dictionary."""
-        return cls(**data)
+        This is an alternative to model_post_init if more complex logic is needed
+        or if it needs to be called from different places.
+        """
+        # This method is kept for demonstration or if post-init logic becomes complex
+
+    class Config:
+        json_schema_extra: ClassVar[Dict[str, Any]] = {
+            "example": {
+                "id": "507f1f77bcf86cd799439011",
+                "identifiers": {
+                    "doi": "10.48550/arXiv.1706.03762",
+                    "arxiv_id": "1706.03762",
+                },
+                "metadata": {
+                    "title": "Attention Is All You Need",
+                    "authors": [{"name": "Ashish Vaswani"}],
+                    "year": 2017,
+                },
+                "content": {
+                    "pdf_url": "https://arxiv.org/pdf/1706.03762.pdf",
+                    "has_grobid_fulltext": False,
+                },
+                "references": [],
+                "created_at": "2024-01-15T10:30:00Z",
+                "updated_at": "2024-01-15T10:30:00Z",
+                # Convenience fields example
+                "title": "Attention Is All You Need",
+                "authors": ["Ashish Vaswani"],
+                "year": 2017,
+                "journal": "NIPS",
+                "doi": "10.48550/arXiv.1706.03762",
+            },
+        }
 
 
 class LiteratureFulltextDTO(BaseModel):
@@ -386,13 +431,18 @@ class LiteratureFulltextDTO(BaseModel):
         None,
         description="Complete GROBID parsed content",
     )
+    source: Optional[str] = Field(None, description="Source of the fulltext parsing")
+    parsed_at: Optional[datetime] = Field(
+        None,
+        description="Timestamp of when the parsing occurred",
+    )
 
     class Config:
-        json_schema_extra = {
+        json_schema_extra: ClassVar[Dict[str, Any]] = {
             "example": {
                 "literature_id": "507f1f77bcf86cd799439011",
                 "parsed_fulltext": {"note": "Large JSON object from GROBID"},
-            }
+            },
         }
 
 
@@ -415,7 +465,7 @@ def literature_to_summary_dto(literature: LiteratureModel) -> LiteratureSummaryD
             "task_info",
             "created_at",
             "updated_at",
-        }
+        },
     )
     # Pydantic v2 needs the 'id' as a string.
     summary_data["id"] = str(summary_data["id"])
@@ -424,7 +474,10 @@ def literature_to_summary_dto(literature: LiteratureModel) -> LiteratureSummaryD
     if "parsed_fulltext" in summary_data.get("content", {}):
         del summary_data["content"]["parsed_fulltext"]
 
-    return LiteratureSummaryDTO(**summary_data)
+    summary = LiteratureSummaryDTO(**summary_data)
+    # Manually trigger the population of convenience fields
+    summary.model_post_init(None)
+    return summary
 
 
 def literature_to_fulltext_dto(literature: LiteratureModel) -> LiteratureFulltextDTO:
@@ -432,4 +485,6 @@ def literature_to_fulltext_dto(literature: LiteratureModel) -> LiteratureFulltex
     return LiteratureFulltextDTO(
         literature_id=str(literature.id),
         parsed_fulltext=literature.content.parsed_fulltext,
+        source="grobid",  # Assuming grobid is the source
+        parsed_at=literature.updated_at,  # Or a more specific timestamp if available
     )
