@@ -250,12 +250,28 @@ async def get_literature_summary(literature_id: str) -> LiteratureSummaryDTO:
         # 手动提取便利字段数据
         convenience_data = _extract_convenience_fields(literature)
 
+        # 创建不包含大型parsed_fulltext的content字段
+        content_summary = {}
+        if literature.content:
+            content_dict = literature.content.model_dump()
+            # 排除大型字段，只保留基本信息
+            content_summary = {
+                "pdf_url": content_dict.get("pdf_url"),
+                "source_page_url": content_dict.get("source_page_url"),
+                "sources_tried": content_dict.get("sources_tried", []),
+                # 只包含处理信息的摘要，不包含实际的parsed_fulltext
+                "has_parsed_fulltext": content_dict.get("parsed_fulltext") is not None,
+                "grobid_processing_summary": _create_processing_summary(
+                    content_dict.get("grobid_processing_info") or {},
+                ),
+            }
+
         # 转换为摘要DTO
         summary = LiteratureSummaryDTO(
             id=str(literature.id),
             identifiers=literature.identifiers,
             metadata=literature.metadata,
-            content=literature.content.model_dump() if literature.content else {},
+            content=content_summary,
             references=literature.references,
             task_info=literature.task_info,
             created_at=literature.created_at,
@@ -281,6 +297,28 @@ async def get_literature_summary(literature_id: str) -> LiteratureSummaryDTO:
         ) from e
 
 
+def _create_processing_summary(grobid_info: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Create a summary of GROBID processing information without large content.
+
+    Args:
+        grobid_info: Full GROBID processing information
+
+    Returns:
+        Summarized processing information
+    """
+    if not grobid_info:
+        return {}
+
+    return {
+        "status": grobid_info.get("status"),
+        "processed_at": grobid_info.get("processed_at"),
+        "processing_time_ms": grobid_info.get("processing_time_ms"),
+        "text_length_chars": grobid_info.get("text_length_chars"),
+        "grobid_version": grobid_info.get("grobid_version"),
+    }
+
+
 @router.get("/{literature_id}/fulltext", summary="Get literature fulltext")
 async def get_literature_fulltext(literature_id: str) -> LiteratureFulltextDTO:
     """
@@ -290,7 +328,7 @@ async def get_literature_fulltext(literature_id: str) -> LiteratureFulltextDTO:
         literature_id: The MongoDB ObjectId of the literature.
 
     Returns:
-        The DTO containing the full parsed content.
+        The DTO containing the full parsed content and processing information.
     """
     try:
         dao = LiteratureDAO()
@@ -307,9 +345,24 @@ async def get_literature_fulltext(literature_id: str) -> LiteratureFulltextDTO:
             literature.content.parsed_fulltext if literature.content else None
         )
 
+        grobid_processing_info = (
+            literature.content.grobid_processing_info if literature.content else None
+        )
+
+        # 确定解析时间和来源
+        parsed_at = None
+        source = None
+
+        if grobid_processing_info:
+            parsed_at = grobid_processing_info.get("processed_at")
+            source = "GROBID"
+
         return LiteratureFulltextDTO(
             literature_id=str(literature.id),
             parsed_fulltext=parsed_fulltext,
+            grobid_processing_info=grobid_processing_info,
+            source=source,
+            parsed_at=parsed_at,
         )
 
     except Exception as e:

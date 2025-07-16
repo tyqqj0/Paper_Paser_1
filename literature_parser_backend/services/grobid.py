@@ -40,9 +40,15 @@ class GrobidClient:
             "version": "/api/version",
             "is_alive": "/api/isalive",
         }
+        # Configure session
         self.session = requests.Session()
-        # GROBID is an internal service, don't use proxy for it
-        self.session.proxies = {"http": None, "https": None}
+        if self.settings.proxy_url:
+            self.session.proxies = {
+                "http": self.settings.proxy_url,
+                "https": self.settings.proxy_url,
+            }
+        else:
+            self.session.proxies = {"http": "", "https": ""}
 
     def health_check(self) -> bool:
         """

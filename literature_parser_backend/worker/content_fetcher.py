@@ -7,11 +7,13 @@ following the three-step process outlined in the architecture document.
 
 import logging
 import os
+from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 
 import requests
 
 from ..models.literature import ContentModel
+from ..services.grobid import GrobidClient
 from ..settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -25,7 +27,8 @@ class ContentFetcher:
         self.settings = settings or Settings()
         self.client = requests.Session()
         self.client.proxies = self.settings.get_proxy_dict()
-        self.client.timeout = self.settings.external_api_timeout
+        self.timeout = self.settings.external_api_timeout
+        self.grobid_client = GrobidClient(settings)
 
     def fetch_content_waterfall(
         self,
@@ -60,12 +63,30 @@ class ContentFetcher:
                 pdf_url = url
                 break  # Use the first one found
 
+        # Initialize content model
         content_model = ContentModel(
             pdf_url=pdf_url,
             source_page_url=self._infer_source_page_url(doi=doi, arxiv_id=arxiv_id),
             parsed_fulltext=None,
+            grobid_processing_info=None,
             sources_tried=raw_data["sources_tried"],
         )
+
+        # If we have a PDF URL, download and parse it
+        if pdf_url:
+            pdf_content = self._download_pdf(pdf_url)
+            if pdf_content:
+                logger.info("PDF downloaded successfully, starting GROBID parsing...")
+                parsed_content, processing_info = self._parse_pdf_with_grobid(
+                    pdf_content,
+                )
+                content_model.parsed_fulltext = parsed_content
+                content_model.grobid_processing_info = processing_info
+                logger.info(
+                    f"GROBID parsing completed. Status: {processing_info.get('status', 'unknown')}",
+                )
+            else:
+                logger.warning("Failed to download PDF, skipping GROBID parsing")
 
         return content_model, raw_data
 
@@ -73,7 +94,7 @@ class ContentFetcher:
         """Download a PDF from a given URL."""
         try:
             logger.info(f"Attempting to download PDF from URL: {url}")
-            response = self.client.get(url)
+            response = self.client.get(url, timeout=self.timeout)
             response.raise_for_status()
             logger.info(f"Successfully downloaded PDF: {len(response.content)} bytes.")
 
@@ -84,7 +105,6 @@ class ContentFetcher:
 
                 # 从URL中提取文件名
                 import urllib.parse
-                from datetime import datetime
 
                 parsed_url = urllib.parse.urlparse(url)
                 filename = os.path.basename(parsed_url.path) or "unknown.pdf"
@@ -148,3 +168,123 @@ class ContentFetcher:
         if doi:
             return f"https://doi.org/{doi}"
         return None
+
+    def _parse_pdf_with_grobid(
+        self, pdf_content: bytes,
+    ) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+        """
+        Parse PDF content using GROBID and structure it for caching.
+
+        Args:
+            pdf_content: Raw PDF bytes
+
+        Returns:
+            Tuple of (parsed_fulltext_dict, processing_info_dict)
+        """
+        start_time = datetime.now()
+        processing_info = {
+            "grobid_version": "0.8.0",  # TODO: Get from GROBID service
+            "processed_at": start_time.isoformat(),
+            "status": "failed",
+            "endpoints_used": [],
+            "xml_size_bytes": 0,
+            "text_length_chars": 0,
+            "processing_time_ms": 0,
+        }
+
+        try:
+            # Use GROBID to parse the full document
+            grobid_result = self.grobid_client.process_pdf(
+                pdf_content, "process_fulltext",
+            )
+
+            if not grobid_result or grobid_result.get("status") != "success":
+                logger.error(f"GROBID processing failed: {grobid_result}")
+                return None, processing_info
+
+            # Extract structured content from GROBID result
+            parsed_fulltext = self._structure_grobid_content(grobid_result)
+
+            # Update processing info
+            end_time = datetime.now()
+            processing_info.update(
+                {
+                    "status": "success",
+                    "endpoints_used": ["processFulltextDocument"],
+                    "xml_size_bytes": len(grobid_result.get("raw_xml", "")),
+                    "text_length_chars": len(parsed_fulltext.get("body_text", "")),
+                    "processing_time_ms": int(
+                        (end_time - start_time).total_seconds() * 1000,
+                    ),
+                },
+            )
+
+            logger.info(
+                f"GROBID parsing successful: {processing_info['text_length_chars']} chars extracted",
+            )
+            return parsed_fulltext, processing_info
+
+        except Exception as e:
+            logger.error(f"Error during GROBID parsing: {e}")
+            end_time = datetime.now()
+            processing_info.update(
+                {
+                    "status": "error",
+                    "error_message": str(e),
+                    "processing_time_ms": int(
+                        (end_time - start_time).total_seconds() * 1000,
+                    ),
+                },
+            )
+            return None, processing_info
+
+    def _structure_grobid_content(
+        self, grobid_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Structure GROBID parsing result into our standardized format.
+
+        Args:
+            grobid_result: Raw GROBID parsing result
+
+        Returns:
+            Structured fulltext content dictionary
+        """
+        structured_content = {
+            "body_text": "",
+            "sections": [],
+            "tables": [],
+            "figures": [],
+            "acknowledgments": "",
+            "appendices": "",
+        }
+
+        try:
+            # Extract body text
+            fulltext = grobid_result.get("fulltext", {})
+            if isinstance(fulltext, dict):
+                body_text = fulltext.get("body", "")
+                if body_text:
+                    structured_content["body_text"] = body_text
+
+                back_text = fulltext.get("back", "")
+                if back_text:
+                    # Try to separate acknowledgments and appendices
+                    if "acknowledgment" in back_text.lower():
+                        structured_content["acknowledgments"] = back_text
+                    elif "appendix" in back_text.lower():
+                        structured_content["appendices"] = back_text
+                    else:
+                        structured_content["appendices"] = back_text
+
+            # TODO: Extract more structured elements like sections, tables, figures
+            # This would require more detailed parsing of the TEI XML structure
+
+            logger.info(
+                f"Structured content created: {len(structured_content['body_text'])} chars body text",
+            )
+            return structured_content
+
+        except Exception as e:
+            logger.error(f"Error structuring GROBID content: {e}")
+            return structured_content

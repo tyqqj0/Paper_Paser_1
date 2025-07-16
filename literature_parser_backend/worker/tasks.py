@@ -209,7 +209,7 @@ def _fetch_from_grobid(
     try:
         grobid_client = GrobidClient()
         # Ensure no proxy is used for internal services
-        grobid_client.session.proxies = {"http": None, "https": None}
+        grobid_client.session.proxies = {"http": "", "https": ""}
 
         header_content = grobid_client.process_header_only(pdf_content)
         if header_content and header_content.get("TEI"):
@@ -345,7 +345,7 @@ def convert_crossref_to_metadata(crossref_data: Dict[str, Any]) -> MetadataModel
     for author in authors_data:
         name = f"{author.get('given', '')} {author.get('family', '')}".strip()
         if name:
-            authors.append(AuthorModel(name=name))
+            authors.append(AuthorModel(name=name, s2_id=None))
 
     year = None
     published = crossref_data.get("published-online", {}) or crossref_data.get(
@@ -405,7 +405,7 @@ def convert_grobid_to_metadata(grobid_data: Dict[str, Any]) -> MetadataModel:
     header = grobid_data.get("header", {})
     authors = []
     for author in header.get("authors", []):
-        authors.append(AuthorModel(name=author["full_name"]))
+        authors.append(AuthorModel(name=author["full_name"], s2_id=None))
 
     return MetadataModel(
         title=header.get("title") or "Unknown Title",
@@ -423,7 +423,7 @@ def _create_fallback_metadata(source_data: Dict[str, Any]) -> MetadataModel:
     if source_data.get("authors"):
         for author_name in source_data["authors"]:
             if isinstance(author_name, str):
-                authors.append(AuthorModel(name=author_name))
+                authors.append(AuthorModel(name=author_name, s2_id=None))
     return MetadataModel(
         title=source_data.get("title") or "Unknown Title",
         authors=authors,
@@ -512,37 +512,84 @@ def _process_literature_sync(task_id: str, source: Dict[str, Any]) -> str:
             f"Primary: {primary_type}",
         )
 
-        # Step 2: Content Fetching (download PDF)
-        update_task_status("下载PDF", 10)
-        content_fetcher = ContentFetcher()
-        content_model, content_raw_data = content_fetcher.fetch_content_waterfall(
-            doi=identifiers.doi,
-            arxiv_id=identifiers.arxiv_id,
-            user_pdf_url=effective_source.get("pdf_url"),
-        )
-
-        pdf_content: Optional[bytes] = None
-        if content_model.pdf_url:
-            pdf_content = content_fetcher._download_pdf(content_model.pdf_url)
-
-        # Step 3: Fetch metadata
+        # Step 2: Fetch metadata (API first, GROBID only if needed)
         update_task_status("获取元数据", 20)
         metadata, metadata_raw_data = fetch_metadata_waterfall(
             identifiers,
-            pdf_content,
+            pdf_content=None,  # Don't provide PDF initially
         )
+
+        # Step 3: Fetch references (API first, GROBID only if needed)
+        update_task_status("获取参考文献", 40)
+        references, references_raw_data = fetch_references_waterfall(
+            identifiers,
+            pdf_content=None,  # Don't provide PDF initially
+        )
+
+        # Step 4: Content Fetching and GROBID parsing (only if needed)
+        pdf_content: Optional[bytes] = None
+        content_model = None
+        content_raw_data: Dict[str, Any] = {}
+
+        # Check if we need PDF for missing metadata or references
+        needs_pdf_for_metadata = (
+            not metadata or not metadata.title or metadata.title == "Unknown Title"
+        )
+        needs_pdf_for_references = not references or len(references) == 0
+
+        if needs_pdf_for_metadata or needs_pdf_for_references:
+            update_task_status("需要PDF解析", 50, "API获取不完整，准备下载PDF")
+
+            content_fetcher = ContentFetcher()
+            content_model, content_raw_data = content_fetcher.fetch_content_waterfall(
+                doi=identifiers.doi,
+                arxiv_id=identifiers.arxiv_id,
+                user_pdf_url=effective_source.get("pdf_url"),
+            )
+
+            # Download PDF content for GROBID processing
+            if content_model.pdf_url:
+                pdf_content = content_fetcher._download_pdf(content_model.pdf_url)
+
+                # Retry metadata with GROBID if needed
+                if needs_pdf_for_metadata:
+                    update_task_status("使用GROBID解析元数据", 60)
+                    grobid_metadata, grobid_meta_raw = fetch_metadata_waterfall(
+                        identifiers,
+                        pdf_content=pdf_content,
+                    )
+                    if grobid_metadata:
+                        metadata = grobid_metadata
+                        metadata_raw_data.update(grobid_meta_raw)
+
+                # Retry references with GROBID if needed
+                if needs_pdf_for_references:
+                    update_task_status("使用GROBID解析参考文献", 70)
+                    grobid_refs, grobid_refs_raw = fetch_references_waterfall(
+                        identifiers,
+                        pdf_content=pdf_content,
+                    )
+                    if grobid_refs:
+                        references = grobid_refs
+                        references_raw_data.update(grobid_refs_raw)
+        else:
+            # No PDF needed, create minimal content model
+            update_task_status("API获取完整", 60, "无需PDF解析")
+            from ..models.literature import ContentModel
+
+            content_model = ContentModel(
+                pdf_url=effective_source.get("pdf_url"),
+                source_page_url=effective_source.get("url"),
+                sources_tried=[],
+                parsed_fulltext=None,
+            )
+
+        # Ensure we have fallback metadata
         if not metadata:
             logger.warning("Metadata could not be fetched. Creating fallback metadata.")
             metadata = _create_fallback_metadata(effective_source)
 
         logger.info(f"Successfully fetched metadata with title: {metadata.title}")
-
-        # Step 4: Fetch references
-        update_task_status("获取参考文献", 65)
-        references, references_raw_data = fetch_references_waterfall(
-            identifiers,
-            pdf_content,
-        )
         logger.info(f"Fetched {len(references)} references.")
 
         # Step 5: Data integration
@@ -551,11 +598,14 @@ def _process_literature_sync(task_id: str, source: Dict[str, Any]) -> str:
         # Step 6: Create task info
         task_info = TaskInfoModel(
             task_id=task_id,
+            status="completed",
             created_at=datetime.now(),
+            completed_at=datetime.now(),
         )
 
         # Step 7: Assemble the final literature model
         literature = LiteratureModel(
+            user_id=None,  # 系统任务，无特定用户
             task_info=task_info,
             identifiers=identifiers,
             metadata=metadata,
