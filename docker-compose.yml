@@ -33,6 +33,8 @@ services:
         condition: service_healthy
       grobid:
         condition: service_started
+    volumes:
+      - ./debug_pdfs:/tmp/debug_pdfs
     networks:
       - literature_parser_network
 

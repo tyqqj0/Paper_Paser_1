@@ -1,6 +1,7 @@
 import enum
 from pathlib import Path
 from tempfile import gettempdir
+from typing import Dict
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from yarl import URL
@@ -59,6 +60,10 @@ class Settings(BaseSettings):
     external_api_timeout: int = 120
     external_api_max_retries: int = 3
 
+    # Proxy settings
+    http_proxy: str = ""
+    https_proxy: str = ""
+
     # Redis settings for Celery
     redis_host: str = "localhost"
     redis_port: int = 6379
@@ -113,6 +118,15 @@ class Settings(BaseSettings):
     def celery_result_backend_computed(self) -> str:
         """Get Celery result backend URL, using redis_url if not explicitly set."""
         return self.celery_result_backend or self.redis_url
+
+    def get_proxy_dict(self) -> Dict[str, str]:
+        """Get proxy configuration as dictionary for requests."""
+        proxy_dict = {}
+        if self.http_proxy:
+            proxy_dict["http"] = self.http_proxy
+        if self.https_proxy:
+            proxy_dict["https"] = self.https_proxy
+        return proxy_dict
 
     model_config = SettingsConfigDict(
         env_file=".env",

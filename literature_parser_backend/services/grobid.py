@@ -41,6 +41,8 @@ class GrobidClient:
             "is_alive": "/api/isalive",
         }
         self.session = requests.Session()
+        # GROBID is an internal service, don't use proxy for it
+        self.session.proxies = {"http": None, "https": None}
 
     def health_check(self) -> bool:
         """
@@ -111,6 +113,9 @@ class GrobidClient:
         if not pdf_content:
             raise ValueError("PDF file content cannot be empty")
 
+        logger.info(f"GROBID_DEBUG: Starting PDF processing with service: {service}")
+        logger.info(f"GROBID_DEBUG: PDF content size: {len(pdf_content)} bytes")
+
         # Prepare form data for GROBID request
         files = {"input": ("document.pdf", pdf_content, "application/pdf")}
 
@@ -128,9 +133,39 @@ class GrobidClient:
         for coord_type in tei_coordinates:
             form_data["teiCoordinates"] = coord_type
 
-        url = f"{self.base_url}{self.endpoints[service]}"
+        # Map service names to endpoints
+        service_mapping = {
+            "processFulltextDocument": "process_fulltext",
+            "processReferences": "process_references",
+            "processHeaderDocument": "process_header",
+            "process_fulltext": "process_fulltext",
+            "process_references": "process_references",
+            "process_header": "process_header",
+        }
+
+        # Get the endpoint key from mapping or use the service directly
+        endpoint_key = service_mapping.get(service, service)
+
+        # Correctly get the endpoint from the dictionary
+        endpoint = self.endpoints.get(endpoint_key)
+        if not endpoint:
+            logger.error(f"GROBID_DEBUG: Invalid service name: {service}")
+            logger.error(
+                f"GROBID_DEBUG: Available services: {list(self.endpoints.keys())}",
+            )
+            logger.error(f"GROBID_DEBUG: Service mapping: {service_mapping}")
+            raise ValueError(f"Invalid service name: {service}")
+
+        url = f"{self.base_url}{endpoint}"
+
+        logger.info(
+            f"GROBID_DEBUG: Mapped service '{service}' to endpoint '{endpoint}'",
+        )
+        logger.info(f"GROBID_DEBUG: Full URL: {url}")
+        logger.info(f"GROBID_DEBUG: Form data: {form_data}")
 
         try:
+            logger.info(f"GROBID_DEBUG: Sending POST request to {url}")
             response = self.session.post(
                 url,
                 files=files,
@@ -138,16 +173,30 @@ class GrobidClient:
                 timeout=self.timeout,
             )
 
+            logger.info(f"GROBID_DEBUG: Response status: {response.status_code}")
+            logger.info(f"GROBID_DEBUG: Response headers: {dict(response.headers)}")
+            logger.info(f"GROBID_DEBUG: Response content length: {len(response.text)}")
+
             if response.status_code == 200:
                 # GROBID returns TEI XML format
                 xml_content = response.text
-                return self._parse_tei_xml(xml_content)
+                logger.info(
+                    f"GROBID_DEBUG: XML content preview: {xml_content[:500]}...",
+                )
+
+                parsed_result = self._parse_tei_xml(xml_content)
+                logger.info(
+                    f"GROBID_DEBUG: Parsed result keys: {list(parsed_result.keys()) if parsed_result else 'None'}",
+                )
+
+                return parsed_result
             elif response.status_code == 204:
                 logger.warning(
                     "GROBID processing completed but no content extracted",
                 )
                 return {"status": "no_content", "message": "No content extracted"}
             else:
+                logger.error(f"GROBID_DEBUG: Error response: {response.text}")
                 response.raise_for_status()
 
         except Timeout:
@@ -245,22 +294,36 @@ class GrobidClient:
     def _extract_header_metadata(self, tei_header: Dict[str, Any]) -> Dict[str, Any]:
         """Extract metadata from TEI header."""
         metadata = {}
+
+        if not tei_header:
+            logger.warning("GROBID_DEBUG: tei_header is None or empty")
+            return {}
+
         file_desc = tei_header.get("fileDesc", {})
         if not file_desc:
+            logger.warning("GROBID_DEBUG: fileDesc is None or empty")
             return {}
+
+        logger.info(
+            f"GROBID_DEBUG: fileDesc keys: {list(file_desc.keys()) if isinstance(file_desc, dict) else 'not a dict'}",
+        )
 
         # Extract title information
         title_stmt_list = file_desc.get("titleStmt", [])
         title_stmt = (
             title_stmt_list[0] if isinstance(title_stmt_list, list) else title_stmt_list
         )
-        if title_stmt and "title" in title_stmt:
+        if title_stmt and isinstance(title_stmt, dict) and "title" in title_stmt:
             title_info = title_stmt["title"]
-            if isinstance(title_info, list):
+            if isinstance(title_info, list) and len(title_info) > 0:
                 title_info = title_info[0]
-            metadata["title"] = (
-                title_info.get("#text") if isinstance(title_info, dict) else title_info
-            )
+            if title_info:
+                metadata["title"] = (
+                    title_info.get("#text")
+                    if isinstance(title_info, dict)
+                    else title_info
+                )
+                logger.info(f"GROBID_DEBUG: Extracted title: {metadata.get('title')}")
 
         # Extract publication information
         publication_stmt_list = file_desc.get("publicationStmt", [])
@@ -269,14 +332,14 @@ class GrobidClient:
             if isinstance(publication_stmt_list, list)
             else publication_stmt_list
         )
-        if publication_stmt:
+        if publication_stmt and isinstance(publication_stmt, dict):
             publisher = publication_stmt.get("publisher")
             if publisher:
                 metadata["publisher"] = publisher
 
             date_info = publication_stmt.get("date")
             if date_info:
-                if isinstance(date_info, list):
+                if isinstance(date_info, list) and len(date_info) > 0:
                     date_info = date_info[0]
                 if isinstance(date_info, dict):
                     metadata["year"] = date_info.get("@when")
@@ -288,16 +351,20 @@ class GrobidClient:
             if isinstance(source_desc_list, list)
             else source_desc_list
         )
-        if source_desc:
+        if source_desc and isinstance(source_desc, dict):
             bibl_struct = source_desc.get("biblStruct", {})
-            if bibl_struct:
+            if bibl_struct and isinstance(bibl_struct, dict):
                 analytic = bibl_struct.get("analytic", {})
-                if analytic:
+                if analytic and isinstance(analytic, dict):
                     metadata["authors"] = self._extract_authors(analytic)
 
-        # Abstract
-        profile_desc = file_desc.get("profileDesc", {})
-        if profile_desc:
+        # Abstract - handle profile_desc being in different locations
+        profile_desc = tei_header.get("profileDesc", {})
+        if not profile_desc:
+            # Sometimes profileDesc is under fileDesc
+            profile_desc = file_desc.get("profileDesc", {})
+
+        if profile_desc and isinstance(profile_desc, dict):
             abstract_data = profile_desc.get("abstract")
             if abstract_data:
                 # Handle cases where abstract is a list of paragraphs or a simple dict
@@ -305,14 +372,29 @@ class GrobidClient:
                     abstract_text = " ".join(
                         p.get("#text", "")
                         for p in abstract_data
-                        if p and p.get("#text")
+                        if p and isinstance(p, dict) and p.get("#text")
                     )
                 elif isinstance(abstract_data, dict):
-                    abstract_text = abstract_data.get("#text") or ""
+                    # Handle single abstract paragraph
+                    div_content = abstract_data.get("div", {})
+                    if div_content and isinstance(div_content, dict):
+                        p_content = div_content.get("p", "")
+                        if isinstance(p_content, dict):
+                            abstract_text = p_content.get("#text", "")
+                        else:
+                            abstract_text = str(p_content) if p_content else ""
+                    else:
+                        abstract_text = abstract_data.get("#text", "")
                 else:
-                    abstract_text = str(abstract_data)
-                metadata["abstract"] = abstract_text.strip()
+                    abstract_text = str(abstract_data) if abstract_data else ""
 
+                if abstract_text:
+                    metadata["abstract"] = abstract_text.strip()
+                    logger.info(
+                        f"GROBID_DEBUG: Extracted abstract: {abstract_text[:100]}...",
+                    )
+
+        logger.info(f"GROBID_DEBUG: Final metadata keys: {list(metadata.keys())}")
         return metadata
 
     def _extract_authors(self, analytic: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -366,17 +448,26 @@ class GrobidClient:
 
         ref_div = None
         # Find the div that contains the list of references
-        for div in back_element.get("div", []):
-            if div.get("listBibl"):
+        div_list = back_element.get("div", [])
+        if not isinstance(div_list, list):
+            div_list = [div_list] if div_list else []
+
+        for div in div_list:
+            if isinstance(div, dict) and div.get("listBibl"):
                 ref_div = div
                 break
 
         if not ref_div:
             return references
 
-        list_bibl = ref_div.get("listBibl", {}).get("biblStruct", [])
+        list_bibl_elem = ref_div.get("listBibl", {})
+        if isinstance(list_bibl_elem, dict):
+            list_bibl = list_bibl_elem.get("biblStruct", [])
+        else:
+            list_bibl = []
+
         if not isinstance(list_bibl, list):
-            list_bibl = [list_bibl]
+            list_bibl = [list_bibl] if list_bibl else []
 
         for bibl_struct in list_bibl:
             parsed_ref = self._parse_reference(bibl_struct)
@@ -392,15 +483,43 @@ class GrobidClient:
         analytic = bibl_struct.get("analytic", {})
         monogr = bibl_struct.get("monogr", {})
 
-        title = analytic.get("title", {}).get("#text")
-        year = monogr.get("imprint", {}).get("date", {}).get("@when")
+        # 安全地提取title
+        title_elem = analytic.get("title", {})
+        if isinstance(title_elem, dict):
+            title = title_elem.get("#text")
+        elif isinstance(title_elem, str):
+            title = title_elem
+        else:
+            title = None
+
+        # 安全地提取year
+        imprint = monogr.get("imprint", {})
+        if isinstance(imprint, dict):
+            date_elem = imprint.get("date", {})
+            if isinstance(date_elem, dict):
+                year = date_elem.get("@when")
+            else:
+                year = None
+        else:
+            year = None
+
+        # 安全地提取authors
         authors = self._extract_authors_from_reference(analytic.get("author", []))
+
+        # 安全地提取journal
+        journal_elem = monogr.get("title")
+        if isinstance(journal_elem, dict):
+            journal = journal_elem.get("#text")
+        elif isinstance(journal_elem, str):
+            journal = journal_elem
+        else:
+            journal = None
 
         return {
             "title": title,
             "year": year,
             "authors": authors,
-            "journal": monogr.get("title"),
+            "journal": journal,
         }
 
     def _extract_authors_from_reference(
@@ -413,19 +532,34 @@ class GrobidClient:
 
         names = []
         for author in authors_data:
-            pers_name = author.get("persName", {})
-            if not pers_name:
+            if not isinstance(author, dict):
                 continue
+
+            pers_name = author.get("persName", {})
+            if not pers_name or not isinstance(pers_name, dict):
+                continue
+
             # Simplified name extraction for references
             name_parts = []
             forenames = pers_name.get("forename", [])
             if not isinstance(forenames, list):
-                forenames = [forenames]
+                forenames = [forenames] if forenames else []
+
             for fname in forenames:
-                name_parts.append(fname.get("#text", ""))
+                if isinstance(fname, dict):
+                    name_parts.append(fname.get("#text", ""))
+                elif isinstance(fname, str):
+                    name_parts.append(fname)
+
             surname = pers_name.get("surname")
+            if isinstance(surname, dict):
+                surname = surname.get("#text", "")
+            elif not isinstance(surname, str):
+                surname = ""
+
             if surname:
                 name_parts.append(surname)
+
             if name_parts:
                 names.append(" ".join(filter(None, name_parts)))
         return names

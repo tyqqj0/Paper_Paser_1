@@ -112,11 +112,15 @@ async def create_indexes() -> None:
         await collection.create_index(
             [("identifiers.doi", 1)],
             name="doi_index",
+            unique=True,
+            sparse=True,
             background=True,
         )
         await collection.create_index(
             [("identifiers.arxiv_id", 1)],
             name="arxiv_id_index",
+            unique=True,
+            sparse=True,
             background=True,
         )
         await collection.create_index(

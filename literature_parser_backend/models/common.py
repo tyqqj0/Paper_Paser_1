@@ -1,15 +1,14 @@
 """Common model components and utilities."""
 
-from typing import Any, ClassVar, Dict
+from typing import Any, Dict
 
 from bson import ObjectId
 from pydantic import (
-    GetJsonSchemaHandler,
     Field,
     GetCoreSchemaHandler,
+    GetJsonSchemaHandler,
 )
-from pydantic.json_schema import JsonSchemaValue
-from pydantic_core import core_schema, CoreSchema
+from pydantic_core import CoreSchema, core_schema
 
 
 class PyObjectId(ObjectId):

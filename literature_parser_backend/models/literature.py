@@ -274,24 +274,31 @@ class LiteratureCreateRequestDTO(BaseModel):
     authors: Optional[List[str]] = Field(None, description="List of author names")
 
     def get_effective_values(self) -> Dict[str, Any]:
-        """Get effective values, prioritizing direct fields over source fields."""
+        """
+        Get a consolidated dictionary of source values.
+
+        This method intelligently merges values from the nested `source` object
+        and the top-level fields, and extracts identifiers from URLs.
+        """
+        # Start with top-level values
+        effective_values = self.model_dump(exclude={"source"}, exclude_none=True)
+
+        # Merge values from the nested source object
         if self.source:
-            return {
-                "doi": self.doi or self.source.doi,
-                "arxiv_id": self.arxiv_id,  # source doesn't have arxiv_id
-                "url": self.url or self.source.url,
-                "pdf_url": self.pdf_url or self.source.pdf_url,
-                "title": self.title or self.source.title,
-                "authors": self.authors or self.source.authors,
-            }
-        return {
-            "doi": self.doi,
-            "arxiv_id": self.arxiv_id,
-            "url": self.url,
-            "pdf_url": self.pdf_url,
-            "title": self.title,
-            "authors": self.authors,
-        }
+            effective_values.update(self.source.model_dump(exclude_none=True))
+
+        # Extract ArXiv ID from URL if not already present
+        if not effective_values.get("arxiv_id") and effective_values.get("url"):
+            url = effective_values["url"]
+            if "arxiv.org/abs/" in url:
+                try:
+                    # Extract the ID part of the URL
+                    arxiv_id = url.split("arxiv.org/abs/")[-1]
+                    effective_values["arxiv_id"] = arxiv_id
+                except IndexError:
+                    pass  # URL format is not as expected
+
+        return effective_values
 
     class Config:
         json_schema_extra: ClassVar[Dict[str, Any]] = {

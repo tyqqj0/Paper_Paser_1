@@ -12,7 +12,7 @@ from .literature import (
     AuthorModel,
     ContentModel,
     IdentifiersModel,
-    LiteratureCreateDTO,
+    LiteratureCreateRequestDTO,
     LiteratureFulltextDTO,
     LiteratureModel,
     LiteratureSourceDTO,
@@ -25,7 +25,7 @@ from .task import TaskStatus, TaskStatusDTO
 
 __all__ = [
     "LiteratureModel",
-    "LiteratureCreateDTO",
+    "LiteratureCreateRequestDTO",
     "LiteratureSourceDTO",
     "LiteratureSummaryDTO",
     "LiteratureFulltextDTO",

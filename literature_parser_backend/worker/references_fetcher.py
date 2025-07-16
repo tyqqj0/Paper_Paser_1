@@ -88,7 +88,7 @@ class ReferencesFetcher:
             try:
                 grobid_data = self.grobid_client.process_pdf(
                     pdf_content,
-                    service="processReferences",
+                    service="process_references",  # Corrected service name
                 )
                 if grobid_data:
                     raw_data["grobid"] = grobid_data

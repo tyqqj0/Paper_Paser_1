@@ -7,7 +7,7 @@ and communication between the API and background workers.
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, ClassVar, Dict, Optional
 
 from pydantic import BaseModel, Field
 
