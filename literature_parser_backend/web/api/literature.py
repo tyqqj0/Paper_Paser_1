@@ -16,7 +16,7 @@ router = APIRouter(prefix="/literature", tags=["文献处理"])
 
 
 def _extract_convenience_fields(literature) -> dict:
-    """从文献对象中提取便利字段"""
+    """从文献对象中提取便利字段，智能处理不同数据源格式"""
     convenience_data = {
         "title": None,
         "authors": [],
@@ -32,67 +32,104 @@ def _extract_convenience_fields(literature) -> dict:
     # 从metadata提取信息
     if literature.metadata:
         metadata_dict = literature.metadata.model_dump()
+        print(f"DEBUG: Metadata dict keys: {list(metadata_dict.keys())}")
+        print(f"DEBUG: Metadata title: {metadata_dict.get('title')}")
 
-        # 尝试不同来源的元数据
-        sources = ["crossref", "semantic_scholar", "grobid"]
+        # 方法1：尝试直接从平面结构提取（新的统一格式）
+        if metadata_dict.get("title"):
+            convenience_data["title"] = metadata_dict["title"]
+        
+        if metadata_dict.get("year"):
+            convenience_data["year"] = metadata_dict["year"]
+            
+        if metadata_dict.get("journal"):
+            convenience_data["journal"] = metadata_dict["journal"]
+            
+        # 处理作者数据
+        if metadata_dict.get("authors"):
+            authors_data = metadata_dict["authors"]
+            if authors_data:
+                author_names = []
+                for author in authors_data:
+                    if isinstance(author, dict):
+                        # 支持不同的作者格式
+                        name = (
+                            author.get("name")
+                            or author.get("full_name")
+                            or f"{author.get('given', '')} {author.get('family', '')}".strip()
+                            or author.get("given")
+                            or author.get("family")
+                        )
+                        if name:
+                            author_names.append(name)
+                    elif isinstance(author, str):
+                        author_names.append(author)
+                
+                if author_names:
+                    convenience_data["authors"] = author_names
 
-        for source in sources:
-            source_data = metadata_dict.get(source, {})
-            if source_data and isinstance(source_data, dict):
-                # 提取标题
-                if not convenience_data["title"] and source_data.get("title"):
-                    convenience_data["title"] = source_data["title"]
+        # 方法2：如果平面结构没有数据，尝试嵌套结构（兼容旧格式）
+        if not any([convenience_data["title"], convenience_data["authors"], convenience_data["year"], convenience_data["journal"]]):
+            # 尝试不同来源的元数据
+            sources = ["crossref", "semantic_scholar", "grobid"]
 
-                # 提取年份
-                if not convenience_data["year"]:
-                    year_val = (
-                        source_data.get("year")
-                        or source_data.get("published-online", {}).get(
-                            "date-parts",
-                            [[None]],
-                        )[0][0]
-                    )
-                    if year_val:
-                        try:
-                            convenience_data["year"] = int(year_val)
-                        except (ValueError, TypeError):
-                            pass
+            for source in sources:
+                source_data = metadata_dict.get(source, {})
+                if source_data and isinstance(source_data, dict):
+                    # 提取标题
+                    if not convenience_data["title"] and source_data.get("title"):
+                        convenience_data["title"] = source_data["title"]
 
-                # 提取期刊
-                if not convenience_data["journal"]:
-                    convenience_data["journal"] = (
-                        source_data.get("journal")
-                        or source_data.get("venue")
-                        or source_data.get("container-title", [None])[0]
-                        if isinstance(source_data.get("container-title"), list)
-                        else source_data.get("container-title")
-                    )
+                    # 提取年份
+                    if not convenience_data["year"]:
+                        year_val = (
+                            source_data.get("year")
+                            or source_data.get("published-online", {}).get(
+                                "date-parts",
+                                [[None]],
+                            )[0][0]
+                        )
+                        if year_val:
+                            try:
+                                convenience_data["year"] = int(year_val)
+                            except (ValueError, TypeError):
+                                pass
 
-                # 提取作者
-                if not convenience_data["authors"]:
-                    authors_data = source_data.get("authors", []) or source_data.get(
-                        "author",
-                        [],
-                    )
-                    if authors_data:
-                        author_names = []
-                        for author in authors_data:
-                            if isinstance(author, dict):
-                                # 不同格式的作者数据
-                                name = (
-                                    author.get("name")
-                                    or author.get("full_name")
-                                    or f"{author.get('given', '')} {author.get('family', '')}".strip()
-                                    or author.get("given")
-                                    or author.get("family")
-                                )
-                                if name:
-                                    author_names.append(name)
-                            elif isinstance(author, str):
-                                author_names.append(author)
+                    # 提取期刊
+                    if not convenience_data["journal"]:
+                        convenience_data["journal"] = (
+                            source_data.get("journal")
+                            or source_data.get("venue")
+                            or source_data.get("container-title", [None])[0]
+                            if isinstance(source_data.get("container-title"), list)
+                            else source_data.get("container-title")
+                        )
 
-                        if author_names:
-                            convenience_data["authors"] = author_names
+                    # 提取作者
+                    if not convenience_data["authors"]:
+                        authors_data = source_data.get("authors", []) or source_data.get(
+                            "author",
+                            [],
+                        )
+                        if authors_data:
+                            author_names = []
+                            for author in authors_data:
+                                if isinstance(author, dict):
+                                    # 不同格式的作者数据
+                                    name = (
+                                        author.get("name")
+                                        or author.get("full_name")
+                                        or f"{author.get('given', '')} {author.get('family', '')}".strip()
+                                        or author.get("given")
+                                        or author.get("family")
+                                    )
+                                    if name:
+                                        author_names.append(name)
+                                elif isinstance(author, str):
+                                    author_names.append(author)
+
+                            if author_names:
+                                convenience_data["authors"] = author_names
 
     return convenience_data
 
@@ -195,6 +232,7 @@ async def get_literature_summary(literature_id: str) -> LiteratureSummaryDTO:
 
         # 手动提取便利字段数据
         convenience_data = _extract_convenience_fields(literature)
+        logger.info(f"Extracted convenience data: {convenience_data}")
 
         # 转换为摘要DTO
         summary = LiteratureSummaryDTO(

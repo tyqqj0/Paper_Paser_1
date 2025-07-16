@@ -5,8 +5,15 @@
 
 import asyncio
 import time
-
+import os
 import httpx
+
+# Give services a moment to start up
+# time.sleep(5) # No need to sleep when running inside the same network
+
+BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:8088/api/v1")
+DOI = "10.1109/5.771073"
+ARXIV_ID = "1706.03762"
 
 
 async def test_literature_parser():
@@ -21,11 +28,11 @@ async def test_literature_parser():
         # 1. API健康检查
         print("\n1️⃣ API健康检查...")
         try:
-            response = await client.get("http://localhost:8000/api/health")
+            response = await client.get("http://127.0.0.1:8088/api/health")
             if response.status_code == 200:
                 print("   ✅ API服务正常")
             else:
-                print(f"   ❌ API服务异常: {response.status_code}")
+                print(f"   ❌ API服务异常: {response.status_code}, {response.text}")
                 return False
         except Exception as e:
             print(f"   ❌ API连接失败: {e}")
@@ -36,7 +43,7 @@ async def test_literature_parser():
         try:
             payload = {"url": test_url}
             response = await client.post(
-                "http://localhost:8000/api/literature", json=payload
+                "http://127.0.0.1:8088/api/literature", json=payload
             )
 
             print(f"   ✅ 任务提交成功")
@@ -61,7 +68,7 @@ async def test_literature_parser():
 
         while time.time() - start_time < max_wait_time:
             try:
-                response = await client.get(f"http://localhost:8000/api/task/{task_id}")
+                response = await client.get(f"http://127.0.0.1:8088/api/task/{task_id}")
                 task_data = response.json()
 
                 status = task_data.get("status", "unknown")
@@ -71,11 +78,10 @@ async def test_literature_parser():
                 print(f"   📊 状态: {status} | 阶段: {stage} | 进度: {progress}%")
 
                 if status == "success":
-                    # 检查不同可能的字段名
                     literature_id = (
-                        task_data.get("result", {}).get("literature_id") or
-                        task_data.get("literature_id") or 
-                        task_data.get("result")  # 有时结果直接是 literature_id
+                        task_data.get("result", {}).get("literature_id")
+                        or task_data.get("literature_id")
+                        or task_data.get("result")
                     )
                     if literature_id:
                         print(f"   🎉 任务完成！文献ID: {literature_id}")
@@ -89,13 +95,12 @@ async def test_literature_parser():
                     print(f"   ❌ 任务失败: {error_msg}")
                     return False
 
-                await asyncio.sleep(3)  # 等待3秒后再次检查
+                await asyncio.sleep(3)
 
             except Exception as e:
                 print(f"   ❌ 任务状态查询失败: {e}")
                 await asyncio.sleep(3)
                 continue
-
         else:
             print(f"   ⏰ 任务超时 (>{max_wait_time}秒)")
             return False
@@ -104,14 +109,14 @@ async def test_literature_parser():
         print(f"\n4️⃣ 检查文献信息 (ID: {literature_id})...")
         try:
             response = await client.get(
-                f"http://localhost:8000/api/literature/{literature_id}"
+                f"http://127.0.0.1:8088/api/literature/{literature_id}"
             )
             if response.status_code == 200:
                 print("   ✅ 文献信息获取成功")
                 lit_data = response.json()
                 print(f"   📰 标题: {lit_data.get('title', 'Unknown')}")
                 print(f"   🔗 DOI: {lit_data.get('doi', 'Unknown')}")
-                print(f"   📅 年份: {lit_data.get('publication_year', 'Unknown')}")
+                print(f"   📅 年份: {lit_data.get('year', 'Unknown')}")
                 print(f"   👥 作者数: {len(lit_data.get('authors', []))}")
                 print(f"   📚 参考文献数: {len(lit_data.get('references', []))}")
             else:
@@ -121,10 +126,10 @@ async def test_literature_parser():
             print(f"   ❌ 文献信息查询失败: {e}")
             return False
 
-    print("\n" + "=" * 50)
-    print("🎉 系统测试全部通过！")
-    print("✅ Literature Parser 系统运行正常")
-    return True
+        print("\n" + "=" * 50)
+        print("🎉 系统测试全部通过！")
+        print("✅ Literature Parser 系统运行正常")
+        return True
 
 
 if __name__ == "__main__":

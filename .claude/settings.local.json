@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python tests/scripts/check_services.py)",
+      "Bash(python3 tests/scripts/check_services.py)"
+    ],
+    "deny": []
+  }
+}

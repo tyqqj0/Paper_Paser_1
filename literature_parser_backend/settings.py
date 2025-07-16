@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     semantic_scholar_api_key: str = ""  # Optional but recommended
 
     # Request timeouts and rate limiting
-    external_api_timeout: int = 30
+    external_api_timeout: int = 120
     external_api_max_retries: int = 3
 
     # Redis settings for Celery

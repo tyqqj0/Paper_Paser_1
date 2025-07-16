@@ -83,7 +83,11 @@ def test_literature_details():
         "'''
 
         result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, check=False,
+            cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            check=False,
         )
 
         if result.returncode == 0:

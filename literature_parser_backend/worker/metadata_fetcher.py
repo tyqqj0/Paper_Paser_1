@@ -149,11 +149,9 @@ class MetadataFetcher:
             # Extract authors
             authors = []
             for author_data in crossref_data.get("authors", []):
-                author = AuthorModel(
-                    full_name=f"{author_data.get('given_names', [])} {author_data.get('family_name', '')}".strip(),
-                    sequence=author_data.get("sequence", "additional"),
-                )
-                authors.append(author)
+                name = f"{author_data.get('given_names', '')} {author_data.get('family_name', '')}".strip()
+                if name:
+                    authors.append(AuthorModel(name=name))
 
             # Create metadata model
             metadata = MetadataModel(
@@ -178,11 +176,13 @@ class MetadataFetcher:
             # Extract authors
             authors = []
             for author_data in s2_data.get("authors", []):
-                author = AuthorModel(
-                    full_name=author_data.get("name", "Unknown Author"),
-                    sequence="first" if len(authors) == 0 else "additional",
-                )
-                authors.append(author)
+                if author_data and author_data.get("name"):
+                    authors.append(
+                        AuthorModel(
+                            name=author_data.get("name"),
+                            s2_id=author_data.get("authorId"),
+                        )
+                    )
 
             # Extract fields of study as keywords
             keywords = []
