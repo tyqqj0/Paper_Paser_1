@@ -95,8 +95,13 @@ class ContentModel(BaseModel):
     parsed_fulltext: Optional[Dict[str, Any]] = Field(
         default=None,
         description=(
-            "GROBID parsed fulltext (large JSON object, excluded from summary APIs)"
+            "GROBID parsed fulltext content including body text, sections, "
+            "tables, figures, and other structured elements"
         ),
+    )
+    grobid_processing_info: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Metadata about GROBID processing including version, timing, and status",
     )
     sources_tried: List[str] = Field(
         default_factory=list,
@@ -108,7 +113,45 @@ class ContentModel(BaseModel):
             "example": {
                 "pdf_url": "https://my-oss.com/1706.03762.pdf",
                 "source_page_url": "https://arxiv.org/abs/1706.03762",
-                "parsed_fulltext": {"note": "Large JSON object from GROBID"},
+                "parsed_fulltext": {
+                    "body_text": "The dominant sequence transduction models...",
+                    "sections": [
+                        {
+                            "title": "Introduction",
+                            "content": "Recurrent neural networks...",
+                            "level": 1,
+                        },
+                        {
+                            "title": "Model Architecture",
+                            "content": "The Transformer follows...",
+                            "level": 1,
+                        },
+                    ],
+                    "tables": [
+                        {
+                            "caption": "Results on machine translation tasks",
+                            "content": "...",
+                            "position": "Table 1",
+                        },
+                    ],
+                    "figures": [
+                        {
+                            "caption": "The Transformer model architecture",
+                            "position": "Figure 1",
+                        },
+                    ],
+                    "acknowledgments": "We thank...",
+                    "appendices": "A. Additional Results...",
+                },
+                "grobid_processing_info": {
+                    "grobid_version": "0.8.0",
+                    "processed_at": "2025-07-16T10:30:00Z",
+                    "processing_time_ms": 1500,
+                    "status": "success",
+                    "endpoints_used": ["processFulltextDocument"],
+                    "xml_size_bytes": 94299,
+                    "text_length_chars": 45000,
+                },
                 "sources_tried": [
                     "user_pdf_url: https://example.com/paper.pdf",
                     "arxiv: https://arxiv.org/pdf/1706.03762.pdf",
@@ -438,6 +481,10 @@ class LiteratureFulltextDTO(BaseModel):
         None,
         description="Complete GROBID parsed content",
     )
+    grobid_processing_info: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Information about GROBID processing",
+    )
     source: Optional[str] = Field(None, description="Source of the fulltext parsing")
     parsed_at: Optional[datetime] = Field(
         None,
@@ -448,7 +495,29 @@ class LiteratureFulltextDTO(BaseModel):
         json_schema_extra: ClassVar[Dict[str, Any]] = {
             "example": {
                 "literature_id": "507f1f77bcf86cd799439011",
-                "parsed_fulltext": {"note": "Large JSON object from GROBID"},
+                "parsed_fulltext": {
+                    "body_text": "The dominant sequence transduction models...",
+                    "sections": [
+                        {
+                            "title": "Introduction",
+                            "content": "Recurrent neural networks...",
+                            "level": 1,
+                        },
+                    ],
+                    "tables": [],
+                    "figures": [],
+                    "acknowledgments": "We thank...",
+                    "appendices": "",
+                },
+                "grobid_processing_info": {
+                    "grobid_version": "0.8.0",
+                    "processed_at": "2025-07-16T10:30:00Z",
+                    "processing_time_ms": 1500,
+                    "status": "success",
+                    "text_length_chars": 45000,
+                },
+                "source": "GROBID",
+                "parsed_at": "2025-07-16T10:30:00Z",
             },
         }
 
@@ -492,6 +561,7 @@ def literature_to_fulltext_dto(literature: LiteratureModel) -> LiteratureFulltex
     return LiteratureFulltextDTO(
         literature_id=str(literature.id),
         parsed_fulltext=literature.content.parsed_fulltext,
+        grobid_processing_info=literature.content.grobid_processing_info,
         source="grobid",  # Assuming grobid is the source
         parsed_at=literature.updated_at,  # Or a more specific timestamp if available
     )

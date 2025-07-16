@@ -31,17 +31,16 @@ class ReferencesFetcher:
         pdf_content: Optional[bytes] = None,
     ) -> Tuple[List[ReferenceModel], Dict[str, Any]]:
         """
-        Fetch references using waterfall approach.
+        Fetch references using waterfall approach: Semantic Scholar -> GROBID fallback.
 
         Args:
-            identifiers: IdentifiersModel object containing doi, arxiv_id, fingerprint
-            primary_type: Primary identifier type ('doi', 'arxiv', 'fingerprint')
-            pdf_content: Optional PDF content for GROBID processing
+            identifiers: Dictionary with doi, arxiv_id, etc.
+            pdf_content: Optional PDF content for GROBID fallback
 
         Returns:
             Tuple of (List[ReferenceModel], raw_data_dict)
         """
-        logger.info(f"Starting references fetch with primary type: {primary_type}")
+        logger.info(f"Starting references fetch with identifiers: {identifiers}")
 
         references: List[ReferenceModel] = []
         raw_data: Dict[str, Any] = {}
