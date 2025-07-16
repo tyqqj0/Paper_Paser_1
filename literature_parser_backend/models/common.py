@@ -2,10 +2,16 @@
 Common model components and utilities.
 """
 
-from typing import Any
+from typing import Annotated, Any
 
 from bson import ObjectId
-from pydantic import Field, GetJsonSchemaHandler
+from pydantic import (
+    BeforeValidator,
+    Field,
+    GetJsonSchemaHandler,
+    PlainSerializer,
+    WithJsonSchema,
+)
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import core_schema
 
@@ -68,15 +74,3 @@ class PyObjectId(ObjectId):
             "description": "MongoDB ObjectId as a 24-character hex string",
             "example": "507f1f77bcf86cd799439011",
         }
-
-
-def create_object_id_field(
-    description: str = "MongoDB ObjectId",
-    example: str = "507f1f77bcf86cd799439011",
-) -> Any:
-    """Helper function to create ObjectId fields with consistent metadata."""
-    return Field(
-        description=description,
-        example=example,
-        json_schema_extra={"pattern": "^[0-9a-fA-F]{24}$"},
-    )

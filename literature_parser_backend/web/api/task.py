@@ -1,6 +1,7 @@
 """任务状态查询 API 端点"""
 
 from datetime import datetime
+from typing import Any, Dict
 
 from celery.result import AsyncResult
 from fastapi import APIRouter, HTTPException, status
@@ -41,7 +42,7 @@ async def get_task_status(task_id: str) -> TaskStatusDTO:
         current_time = datetime.now()
 
         # 构建响应数据
-        response_data = {
+        response_data: Dict[str, Any] = {
             "task_id": task_id,
             "status": task_status,
             "literature_id": None,
@@ -116,7 +117,7 @@ async def get_task_status(task_id: str) -> TaskStatusDTO:
 
 
 @router.delete("/{task_id}", summary="取消任务")
-async def cancel_task(task_id: str):
+async def cancel_task(task_id: str) -> Dict[str, str]:
     """
     取消正在执行的任务
 

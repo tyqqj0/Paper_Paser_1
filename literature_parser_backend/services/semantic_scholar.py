@@ -266,9 +266,9 @@ class SemanticScholarClient:
         else:
             return "unknown"
 
-    def _parse_paper_data(self, paper_data: Dict) -> Dict[str, Any]:
+    def _parse_paper_data(self, paper_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Parse paper data from Semantic Scholar API into our format.
+        Parse and clean paper data from Semantic Scholar API response.
 
         Args:
             paper_data (Dict): The raw paper data from the API.
@@ -305,9 +305,9 @@ class SemanticScholarClient:
             "tldr": (paper_data.get("tldr") or {}).get("text"),
         }
 
-    def _parse_authors(self, authors_data: List[Dict]) -> List[Dict]:
+    def _parse_authors(self, authors_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Parse author data into a simplified format.
+        Parse and clean author data from API response.
 
         Args:
             authors_data (List[Dict]): Raw author data from API.

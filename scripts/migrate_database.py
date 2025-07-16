@@ -4,10 +4,9 @@
 将现有数据从admin数据库迁移到literature_parser数据库
 """
 
-import pymongo
-from bson import ObjectId
 import logging
-from datetime import datetime
+
+import pymongo
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -19,7 +18,7 @@ def migrate_database():
 
     # 连接MongoDB
     client = pymongo.MongoClient(
-        "mongodb://literature_parser_backend:literature_parser_backend@localhost:27017/admin"
+        "mongodb://literature_parser_backend:literature_parser_backend@localhost:27017/admin",
     )
 
     try:
@@ -84,7 +83,7 @@ def migrate_database():
         # 创建文本搜索索引
         try:
             target_collection.create_index(
-                [("metadata.title", "text"), ("metadata.authors.full_name", "text")]
+                [("metadata.title", "text"), ("metadata.authors.full_name", "text")],
             )
             logger.info("创建文本搜索索引")
         except Exception as e:

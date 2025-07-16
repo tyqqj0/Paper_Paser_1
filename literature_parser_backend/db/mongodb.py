@@ -6,7 +6,7 @@ This module provides MongoDB database connection using Motor
 """
 
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from motor.motor_asyncio import (
     AsyncIOMotorClient,
@@ -19,13 +19,13 @@ from ..settings import Settings
 logger = logging.getLogger(__name__)
 
 # Global database client and database instances
-_client: Optional[AsyncIOMotorClient] = None
-_database: Optional[AsyncIOMotorDatabase] = None
+_client: Optional[AsyncIOMotorClient[Dict[str, Any]]] = None
+_database: Optional[AsyncIOMotorDatabase[Dict[str, Any]]] = None
 
 
 async def connect_to_mongodb(
     settings: Optional[Settings] = None,
-) -> AsyncIOMotorDatabase:
+) -> AsyncIOMotorDatabase[Dict[str, Any]]:
     """
     Connect to MongoDB and return database instance.
 
@@ -68,7 +68,7 @@ async def connect_to_mongodb(
         raise
 
 
-async def disconnect_from_mongodb():
+async def disconnect_from_mongodb() -> None:
     """Disconnect from MongoDB."""
     global _client, _database
 
@@ -79,7 +79,7 @@ async def disconnect_from_mongodb():
         logger.info("Disconnected from MongoDB")
 
 
-def get_database() -> AsyncIOMotorDatabase:
+def get_database() -> AsyncIOMotorDatabase[Dict[str, Any]]:
     """
     Get the current database instance.
 
@@ -93,7 +93,7 @@ def get_database() -> AsyncIOMotorDatabase:
     return _database
 
 
-def literature_collection() -> AsyncIOMotorCollection:
+def literature_collection() -> AsyncIOMotorCollection[Dict[str, Any]]:
     """
     Get the literature collection.
 
@@ -103,7 +103,7 @@ def literature_collection() -> AsyncIOMotorCollection:
     return database.literatures
 
 
-async def create_indexes():
+async def create_indexes() -> None:
     """Create necessary indexes for better query performance."""
     try:
         collection = literature_collection()

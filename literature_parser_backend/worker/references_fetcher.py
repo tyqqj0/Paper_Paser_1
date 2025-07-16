@@ -8,7 +8,7 @@ trying different data sources in priority order.
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
-from ..models.literature import ReferenceModel
+from ..models.literature import ReferenceModel, IdentifiersModel
 from ..services.semantic_scholar import SemanticScholarClient
 from ..settings import Settings
 
@@ -32,7 +32,7 @@ class ReferencesFetcher:
 
     def fetch_references_waterfall(
         self,
-        identifiers,  # IdentifiersModel object
+        identifiers: IdentifiersModel,
         primary_type: str,
         pdf_content: Optional[bytes] = None,
     ) -> Tuple[List[ReferenceModel], Dict[str, Any]]:
@@ -49,15 +49,16 @@ class ReferencesFetcher:
         """
         logger.info(f"Starting references fetch with primary type: {primary_type}")
 
-        references = []
-        raw_data = {}
+        references: List[ReferenceModel] = []
+        raw_data: Dict[str, Any] = {}
 
         # Strategy 1: Try Semantic Scholar if we have a DOI or ArXiv ID
-        if identifiers.doi or identifiers.arxiv_id:
+        s2_identifier = identifiers.doi or identifiers.arxiv_id
+        if s2_identifier:
             logger.info("Attempting Semantic Scholar references lookup...")
             try:
                 references, raw_data = self._fetch_from_semantic_scholar(
-                    identifiers.doi or identifiers.arxiv_id,
+                    s2_identifier,
                     "doi" if identifiers.doi else "arxiv",
                 )
                 if references:

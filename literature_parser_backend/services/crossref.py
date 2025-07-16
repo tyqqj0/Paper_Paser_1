@@ -174,7 +174,7 @@ class CrossRefClient:
 
         return results
 
-    def _parse_crossref_work(self, work_data: Dict) -> Dict[str, Any]:
+    def _parse_crossref_work(self, work_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Parse CrossRef work data into our standard format.
 

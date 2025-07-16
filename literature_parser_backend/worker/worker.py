@@ -23,9 +23,9 @@ logging.basicConfig(
 )
 
 
-def main():
-    """Start the Celery worker."""
-    # Start worker with specific configuration
+def main() -> None:
+    """Entry point for starting the Celery worker."""
+    # This is a simple wrapper for the Celery CLI.
     celery_app.worker_main(
         [
             "worker",

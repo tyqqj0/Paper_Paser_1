@@ -8,7 +8,7 @@ architecture document, trying different data sources in priority order.
 import logging
 from typing import Any, Dict, Optional, Tuple
 
-from ..models.literature import AuthorModel, MetadataModel
+from ..models.literature import AuthorModel, IdentifiersModel, MetadataModel
 from ..services.crossref import CrossRefClient
 from ..services.semantic_scholar import SemanticScholarClient
 from ..settings import Settings
@@ -34,7 +34,7 @@ class MetadataFetcher:
 
     def fetch_metadata_waterfall(
         self,
-        identifiers: Dict[str, Any],
+        identifiers: IdentifiersModel,
         primary_type: str,
         source_data: Dict[str, Any],
     ) -> Tuple[MetadataModel, Dict[str, Any]]:
@@ -51,9 +51,9 @@ class MetadataFetcher:
         """
         logger.info(f"Starting metadata fetch with primary type: {primary_type}")
 
-        metadata = None
-        raw_data = {}
-        source_priority = []
+        metadata: Optional[MetadataModel] = None
+        raw_data: Dict[str, Any] = {}
+        source_priority: list[str] = []
 
         # Strategy 1: Try CrossRef if we have a DOI
         if identifiers.doi and primary_type == "doi":
@@ -75,17 +75,18 @@ class MetadataFetcher:
                 identifier = identifiers.arxiv_id or identifiers.doi
                 id_type = "arxiv" if identifiers.arxiv_id else "doi"
 
-                metadata, raw_data = self._fetch_from_semantic_scholar(
-                    identifier,
-                    id_type,
-                )
-                if metadata:
-                    source_priority.append("Semantic Scholar API")
-                    logger.info(
-                        "✅ Successfully fetched metadata from Semantic Scholar",
+                if identifier:  # Add check here
+                    metadata, raw_data = self._fetch_from_semantic_scholar(
+                        identifier,
+                        id_type,
                     )
-                else:
-                    logger.info("❌ No metadata found in Semantic Scholar")
+                    if metadata:
+                        source_priority.append("Semantic Scholar API")
+                        logger.info(
+                            "✅ Successfully fetched metadata from Semantic Scholar",
+                        )
+                    else:
+                        logger.info("❌ No metadata found in Semantic Scholar")
             except Exception as e:
                 logger.warning(f"Semantic Scholar lookup failed: {e}")
 
@@ -106,7 +107,7 @@ class MetadataFetcher:
     def _fetch_from_crossref(
         self,
         doi: str,
-    ) -> Tuple[Optional[MetadataModel], Dict]:
+    ) -> Tuple[Optional[MetadataModel], Dict[str, Any]]:
         """Fetch metadata from CrossRef API."""
         try:
             crossref_data = self.crossref_client.get_metadata_by_doi(doi)
@@ -125,7 +126,7 @@ class MetadataFetcher:
         self,
         identifier: str,
         id_type: str,
-    ) -> Tuple[Optional[MetadataModel], Dict]:
+    ) -> Tuple[Optional[MetadataModel], Dict[str, Any]]:
         """Fetch metadata from Semantic Scholar API."""
         try:
             s2_data = self.semantic_scholar_client.get_metadata(
@@ -143,7 +144,10 @@ class MetadataFetcher:
             logger.error(f"Semantic Scholar fetch error: {e}")
             return None, {}
 
-    def _convert_crossref_to_metadata(self, crossref_data: Dict) -> MetadataModel:
+    def _convert_crossref_to_metadata(
+        self,
+        crossref_data: Dict[str, Any],
+    ) -> MetadataModel:
         """Convert CrossRef data to MetadataModel."""
         try:
             # Extract authors
@@ -151,7 +155,7 @@ class MetadataFetcher:
             for author_data in crossref_data.get("authors", []):
                 name = f"{author_data.get('given_names', '')} {author_data.get('family_name', '')}".strip()
                 if name:
-                    authors.append(AuthorModel(name=name))
+                    authors.append(AuthorModel(name=name, s2_id=None))
 
             # Create metadata model
             metadata = MetadataModel(
@@ -170,7 +174,10 @@ class MetadataFetcher:
             logger.error(f"Error converting CrossRef data: {e}")
             return self._create_minimal_metadata("CrossRef conversion error")
 
-    def _convert_semantic_scholar_to_metadata(self, s2_data: Dict) -> MetadataModel:
+    def _convert_semantic_scholar_to_metadata(
+        self,
+        s2_data: Dict[str, Any],
+    ) -> MetadataModel:
         """Convert Semantic Scholar data to MetadataModel."""
         try:
             # Extract authors
@@ -181,7 +188,7 @@ class MetadataFetcher:
                         AuthorModel(
                             name=author_data.get("name"),
                             s2_id=author_data.get("authorId"),
-                        )
+                        ),
                     )
 
             # Extract fields of study as keywords
@@ -210,7 +217,7 @@ class MetadataFetcher:
     def _create_fallback_metadata(
         self,
         source_data: Dict[str, Any],
-        identifiers: Dict[str, Any],
+        identifiers: IdentifiersModel,
     ) -> MetadataModel:
         """Create minimal metadata from source data when all APIs fail."""
         # Try to extract title from various sources
