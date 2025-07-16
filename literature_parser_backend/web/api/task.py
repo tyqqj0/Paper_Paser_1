@@ -1,4 +1,4 @@
-"""任务状态查询 API 端点"""
+"""Task status query API endpoints."""
 
 from datetime import datetime
 from typing import Any, Dict
@@ -13,19 +13,19 @@ from literature_parser_backend.worker.celery_app import celery_app
 router = APIRouter(prefix="/task", tags=["任务管理"])
 
 
-@router.get("/{task_id}", summary="查询任务状态")
+@router.get("/{task_id}", summary="Query task status")
 async def get_task_status(task_id: str) -> TaskStatusDTO:
     """
-    查询Celery任务的状态和结果
+    Query the status and result of a Celery task.
 
     Args:
-        task_id: Celery任务ID
+        task_id: The Celery task ID.
 
     Returns:
-        TaskStatusDTO: 任务状态信息
+        The task status information.
     """
     try:
-        # 获取任务结果
+        # Get task result from Celery backend
         task_result = AsyncResult(task_id, app=celery_app)
 
         # 基础任务状态映射
@@ -56,19 +56,21 @@ async def get_task_status(task_id: str) -> TaskStatusDTO:
             # 成功状态：提取文献ID和其他信息
             result = task_result.result
             if isinstance(result, dict):
-                response_data["literature_id"] = result.get("literature_id")
-                response_data["resource_url"] = (
-                    f"/api/literature/{result.get('literature_id')}"
-                    if result.get("literature_id")
-                    else None
+                response_data.update(
+                    literature_id=result.get("literature_id"),
+                    resource_url=(
+                        f"/api/literature/{result['literature_id']}"
+                        if result.get("literature_id")
+                        else None
+                    ),
                 )
             response_data["progress_percentage"] = 100
 
         elif task_result.status == "FAILURE":
             # 失败状态：提取错误信息
-            error_msg = str(task_result.info) if task_result.info else "任务执行失败"
+            error_msg = str(task_result.info) if task_result.info else "Task failed"
             response_data["error_info"] = {
-                "error_type": "ProcessingError",
+                "error_type": "TaskExecutionError",
                 "error_message": error_msg,
             }
 
@@ -80,12 +82,10 @@ async def get_task_status(task_id: str) -> TaskStatusDTO:
             # 处理中状态：尝试获取进度信息
             if hasattr(task_result, "info") and isinstance(task_result.info, dict):
                 info = task_result.info
-                response_data["progress_percentage"] = info.get(
-                    "progress_percentage",
-                    50,
+                response_data.update(
+                    stage=info.get("stage", "Processing"),
+                    progress_percentage=info.get("progress", 0),
                 )
-            else:
-                response_data["progress_percentage"] = 50
 
         elif task_result.status == "REVOKED":
             # 已取消状态
@@ -100,43 +100,42 @@ async def get_task_status(task_id: str) -> TaskStatusDTO:
         return TaskStatusDTO(**response_data)
 
     except Exception as e:
-        logger.error(f"查询任务状态错误: {task_id} - {e!s}")
+        logger.error(f"Error querying task status for {task_id}: {e!s}")
 
-        # 如果是无效的任务ID，返回404
+        # Return 404 for invalid task IDs
         if "Invalid task ID" in str(e) or "not found" in str(e):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="任务不存在",
-            )
+                detail="Task not found",
+            ) from e
 
-        # 其他错误返回500
+        # Return 500 for other errors
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"查询任务状态失败: {e!s}",
-        )
+            detail=f"Failed to query task status: {e!s}",
+        ) from e
 
 
-@router.delete("/{task_id}", summary="取消任务")
+@router.delete("/{task_id}", summary="Cancel a task")
 async def cancel_task(task_id: str) -> Dict[str, str]:
     """
-    取消正在执行的任务
+    Cancel a running task.
 
     Args:
-        task_id: Celery任务ID
+        task_id: The Celery task ID.
 
     Returns:
-        取消操作结果
+        The result of the cancellation operation.
     """
     try:
-        # 撤销任务
+        # Revoke the task
         celery_app.control.revoke(task_id, terminate=True)
-
-        logger.info(f"任务已取消: {task_id}")
-        return {"message": "任务取消成功", "task_id": task_id, "status": "cancelled"}
+        logger.info(f"Cancellation request sent for task: {task_id}")
+        return {"message": "Task cancellation request sent"}
 
     except Exception as e:
-        logger.error(f"取消任务错误: {task_id} - {e!s}")
+        logger.error(f"Error cancelling task {task_id}: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"取消任务失败: {e!s}",
-        )
+            detail=f"Failed to cancel task: {e!s}",
+        ) from e

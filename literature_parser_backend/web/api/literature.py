@@ -1,9 +1,10 @@
-"""文献处理 API 端点"""
+"""Literature processing API endpoints."""
+
+from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import JSONResponse
 from loguru import logger
-from typing import Any, Dict
 
 from literature_parser_backend.db.dao import LiteratureDAO
 from literature_parser_backend.models.literature import (
@@ -18,7 +19,11 @@ router = APIRouter(prefix="/literature", tags=["文献处理"])
 
 
 def _extract_convenience_fields(literature: LiteratureModel) -> Dict[str, Any]:
-    """从文献对象中提取便利字段，智能处理不同数据源格式"""
+    """
+    Extract convenience fields from the literature model.
+
+    This function intelligently handles different data source formats.
+    """
     convenience_data: Dict[str, Any] = {
         "title": None,
         "authors": [],
@@ -144,15 +149,17 @@ def _extract_convenience_fields(literature: LiteratureModel) -> Dict[str, Any]:
     return convenience_data
 
 
-@router.post("", summary="提交文献处理请求")
-async def create_literature(literature_data: LiteratureCreateDTO) -> JSONResponse:
+@router.post("", summary="Submit literature for processing")
+async def create_literature(
+    literature_data: LiteratureCreateDTO,
+) -> JSONResponse:
     """
-    提交文献处理请求
+    Submit a literature processing request.
 
-    逻辑流程：
-    1. 根据DOI或其他唯一标识符查重
-    2. 如果找到现有文献，返回200和literatureId
-    3. 如果未找到，启动后台任务，返回202和taskId
+    Workflow:
+    1. Deduplicate based on DOI or other unique identifiers.
+    2. If found, return 200 with the existing literatureId.
+    3. If not found, start a background task and return 202 with a taskId.
     """
     try:
         dao = LiteratureDAO()
@@ -215,20 +222,20 @@ async def create_literature(literature_data: LiteratureCreateDTO) -> JSONRespons
         logger.error(f"文献提交处理错误: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"内部服务错误: {e!s}",
-        )
+            detail=f"Internal server error: {e!s}",
+        ) from e
 
 
-@router.get("/{literature_id}", summary="获取文献摘要信息")
+@router.get("/{literature_id}", summary="Get literature summary")
 async def get_literature_summary(literature_id: str) -> LiteratureSummaryDTO:
     """
-    获取文献的摘要信息
+    Get summary information for a literature.
 
     Args:
-        literature_id: 文献的MongoDB ObjectId
+        literature_id: The MongoDB ObjectId of the literature.
 
     Returns:
-        LiteratureSummaryDTO: 文献摘要信息
+        The literature summary information.
     """
     try:
         dao = LiteratureDAO()
@@ -270,20 +277,20 @@ async def get_literature_summary(literature_id: str) -> LiteratureSummaryDTO:
         logger.error(f"获取文献摘要错误: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"内部服务错误: {e!s}",
-        )
+            detail=f"Internal server error: {e!s}",
+        ) from e
 
 
-@router.get("/{literature_id}/fulltext", summary="获取文献完整内容")
+@router.get("/{literature_id}/fulltext", summary="Get literature fulltext")
 async def get_literature_fulltext(literature_id: str) -> LiteratureFulltextDTO:
     """
-    获取文献的完整解析内容（例如GROBID的输出）
+    Get the full parsed content of a literature (e.g., from GROBID).
 
     Args:
-        literature_id: 文献的MongoDB ObjectId
+        literature_id: The MongoDB ObjectId of the literature.
 
     Returns:
-        LiteratureFulltextDTO: 包含完整解析内容
+        The DTO containing the full parsed content.
     """
     try:
         dao = LiteratureDAO()
@@ -309,5 +316,5 @@ async def get_literature_fulltext(literature_id: str) -> LiteratureFulltextDTO:
         logger.error(f"获取文献全文内容错误: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"内部服务错误: {e!s}",
-        )
+            detail=f"Internal server error: {e!s}",
+        ) from e

@@ -6,7 +6,7 @@ to extract metadata and fulltext from PDF documents.
 """
 
 import logging
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, List, Optional
 
 import requests
 import xmltodict
@@ -82,12 +82,14 @@ class GrobidClient:
 
     def process_pdf(
         self,
-        pdf_file: bytes,
-        include_raw_citations: bool = True,
-        include_raw_affiliations: bool = True,
-        consolidate_header: int = 1,
-        consolidate_citations: int = 0,
+        pdf_content: bytes,
+        service: str = "processFulltextDocument",
+        consolidate_header: bool = True,
+        consolidate_citations: bool = False,
+        include_raw_citations: bool = False,
+        include_raw_affiliations: bool = False,
         tei_coordinates: Optional[List[str]] = None,
+        segment_sentences: bool = False,
     ) -> Dict[str, Any]:
         """
         Process a PDF file to extract fulltext and metadata using GROBID.
@@ -106,11 +108,11 @@ class GrobidClient:
         Raises:
             Exception: If processing fails
         """
-        if not pdf_file:
+        if not pdf_content:
             raise ValueError("PDF file content cannot be empty")
 
         # Prepare form data for GROBID request
-        files = {"input": ("document.pdf", pdf_file, "application/pdf")}
+        files = {"input": ("document.pdf", pdf_content, "application/pdf")}
 
         # Form parameters based on GROBID API documentation
         form_data = {
@@ -121,11 +123,12 @@ class GrobidClient:
         }
 
         # Add coordinates parameters if specified
-        if tei_coordinates:
-            for coord_type in tei_coordinates:
-                form_data["teiCoordinates"] = coord_type
+        if tei_coordinates is None:
+            tei_coordinates = []
+        for coord_type in tei_coordinates:
+            form_data["teiCoordinates"] = coord_type
 
-        url = f"{self.base_url}{self.endpoints['process_fulltext']}"
+        url = f"{self.base_url}{self.endpoints[service]}"
 
         try:
             response = self.session.post(
@@ -242,201 +245,210 @@ class GrobidClient:
     def _extract_header_metadata(self, tei_header: Dict[str, Any]) -> Dict[str, Any]:
         """Extract metadata from TEI header."""
         metadata = {}
-        try:
-            file_desc_list = tei_header.get("fileDesc", [])
-            file_desc = (
-                file_desc_list[0]
-                if isinstance(file_desc_list, list)
-                else file_desc_list
+        file_desc = tei_header.get("fileDesc", {})
+        if not file_desc:
+            return {}
+
+        # Extract title information
+        title_stmt_list = file_desc.get("titleStmt", [])
+        title_stmt = (
+            title_stmt_list[0] if isinstance(title_stmt_list, list) else title_stmt_list
+        )
+        if title_stmt and "title" in title_stmt:
+            title_info = title_stmt["title"]
+            if isinstance(title_info, list):
+                title_info = title_info[0]
+            metadata["title"] = (
+                title_info.get("#text") if isinstance(title_info, dict) else title_info
             )
-            if not file_desc:
-                return {}
 
-            # Extract title information
-            title_stmt_list = file_desc.get("titleStmt", [])
-            title_stmt = (
-                title_stmt_list[0]
-                if isinstance(title_stmt_list, list)
-                else title_stmt_list
-            )
-            if title_stmt and "title" in title_stmt:
-                title_info = title_stmt["title"]
-                if isinstance(title_info, list):
-                    title_info = title_info[0]
-                metadata["title"] = (
-                    title_info.get("#text")
-                    if isinstance(title_info, dict)
-                    else title_info
-                )
+        # Extract publication information
+        publication_stmt_list = file_desc.get("publicationStmt", [])
+        publication_stmt = (
+            publication_stmt_list[0]
+            if isinstance(publication_stmt_list, list)
+            else publication_stmt_list
+        )
+        if publication_stmt:
+            publisher = publication_stmt.get("publisher")
+            if publisher:
+                metadata["publisher"] = publisher
 
-            # Extract publication information
-            publication_stmt_list = file_desc.get("publicationStmt", [])
-            publication_stmt = (
-                publication_stmt_list[0]
-                if isinstance(publication_stmt_list, list)
-                else publication_stmt_list
-            )
-            if publication_stmt:
-                publisher = publication_stmt.get("publisher")
-                if publisher:
-                    metadata["publisher"] = publisher
+            date_info = publication_stmt.get("date")
+            if date_info:
+                if isinstance(date_info, list):
+                    date_info = date_info[0]
+                if isinstance(date_info, dict):
+                    metadata["year"] = date_info.get("@when")
 
-                date_info = publication_stmt.get("date")
-                if date_info:
-                    if isinstance(date_info, list):
-                        date_info = date_info[0]
-                    if isinstance(date_info, dict):
-                        metadata["year"] = date_info.get("@when")
+        # Extract source description for authors
+        source_desc_list = file_desc.get("sourceDesc", [])
+        source_desc = (
+            source_desc_list[0]
+            if isinstance(source_desc_list, list)
+            else source_desc_list
+        )
+        if source_desc:
+            bibl_struct = source_desc.get("biblStruct", {})
+            if bibl_struct:
+                analytic = bibl_struct.get("analytic", {})
+                if analytic:
+                    metadata["authors"] = self._extract_authors(analytic)
 
-            # Extract source description for authors
-            source_desc_list = file_desc.get("sourceDesc", [])
-            source_desc = (
-                source_desc_list[0]
-                if isinstance(source_desc_list, list)
-                else source_desc_list
-            )
-            if source_desc:
-                bibl_struct = source_desc.get("biblStruct", {})
-                if bibl_struct:
-                    analytic = bibl_struct.get("analytic", {})
-                    if analytic:
-                        metadata["authors"] = self._extract_authors(analytic)
-
-            # Abstract
-            profile_desc = file_desc.get("profileDesc", {})
-            if profile_desc:
-                abstract_data = profile_desc.get("abstract")
-                if abstract_data:
-                    # Handle cases where abstract is a list of paragraphs or a simple dict
-                    if isinstance(abstract_data, list):
-                        abstract_text = " ".join(
-                            p.get("#text", "") for p in abstract_data if p and p.get("#text")
-                        )
-                    elif isinstance(abstract_data, dict):
-                        abstract_text = abstract_data.get("#text") or ""
-                    else:
-                        abstract_text = str(abstract_data)
-                    metadata["abstract"] = abstract_text.strip()
-
-        except Exception as e:
-            logger.error(f"Error extracting header metadata: {e}", exc_info=True)
+        # Abstract
+        profile_desc = file_desc.get("profileDesc", {})
+        if profile_desc:
+            abstract_data = profile_desc.get("abstract")
+            if abstract_data:
+                # Handle cases where abstract is a list of paragraphs or a simple dict
+                if isinstance(abstract_data, list):
+                    abstract_text = " ".join(
+                        p.get("#text", "")
+                        for p in abstract_data
+                        if p and p.get("#text")
+                    )
+                elif isinstance(abstract_data, dict):
+                    abstract_text = abstract_data.get("#text") or ""
+                else:
+                    abstract_text = str(abstract_data)
+                metadata["abstract"] = abstract_text.strip()
 
         return metadata
 
     def _extract_authors(self, analytic: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Extract and format author information."""
-        authors_list = []
-        author_data = analytic.get("author", [])
-        if not isinstance(author_data, list):
-            author_data = [author_data]
+        """Extract authors from analytic section."""
+        authors = []
+        author_list = analytic.get("author", [])
+        if not isinstance(author_list, list):
+            author_list = [author_list]
 
-        for author in author_data:
-            pers_name = author.get("persName", {})
-            if pers_name:
-                forenames = pers_name.get("forename", [])
-                if not isinstance(forenames, list):
-                    forenames = [forenames]
-                surnames = pers_name.get("surname", [])
-                if not isinstance(surnames, list):
-                    surnames = [surnames]
+        for author_node in author_list:
+            pers_name = author_node.get("persName", {})
+            if not pers_name:
+                continue
 
-                forename_parts = [
-                    n.get("#text")
-                    for n in forenames
-                    if isinstance(n, dict) and n.get("#text")
-                ]
-                surname_parts = [
-                    s.get("#text")
-                    for s in surnames
-                    if isinstance(s, dict) and s.get("#text")
-                ]
-                full_name = " ".join(filter(None, forename_parts + surname_parts))
-                authors_list.append({"full_name": full_name.strip()})
-        return authors_list
+            first_name = pers_name.get("forename", {"#text": ""})
+            if isinstance(first_name, list):
+                first_name = first_name[0]
+            first_name_text = (
+                first_name.get("#text") if isinstance(first_name, dict) else ""
+            )
+
+            last_name = pers_name.get("surname", "")
+            full_name = f"{first_name_text} {last_name}".strip()
+            authors.append({"full_name": full_name})
+        return authors
 
     def _extract_fulltext(self, text_element: Dict[str, Any]) -> Dict[str, Any]:
-        """Extract structured fulltext from TEI body."""
-        fulltext = {"body": "", "sections": []}
-        try:
-            body = text_element.get("body", {})
-            if body:
-                # Simple extraction of all text content from the body
-                fulltext["body"] = xmltodict.unparse({"body": body}, full_xml_declaration=False)
+        """Extract and structure the fulltext from the TEI body."""
+        fulltext = {"body": None, "back": None}
+        if not text_element or not isinstance(text_element, dict):
+            return fulltext
 
-                # More structured extraction of sections
-                divs = body.get("div", [])
-                if not isinstance(divs, list):
-                    divs = [divs]
+        # Extract body
+        body = text_element.get("body", {})
+        if body and isinstance(body, dict):
+            fulltext["body"] = self._stringify_divs(body.get("div", []))
 
-                for div in divs:
-                    section = {}
-                    head = div.get("head", {})
-                    if head:
-                        section["title"] = head.get("#text")
-                        section["level"] = head.get("@n")
-                    
-                    paragraphs = []
-                    ps = div.get("p", [])
-                    if not isinstance(ps, list):
-                        ps = [ps]
-                    for p_element in ps:
-                        if isinstance(p_element, str):
-                            paragraphs.append(p_element)
-                        elif isinstance(p_element, dict):
-                            text = p_element.get("#text")
-                            if text:
-                                paragraphs.append(text)
+        # Extract back matter (references, etc.)
+        back = text_element.get("back", {})
+        if back and isinstance(back, dict):
+            fulltext["back"] = self._stringify_divs(back.get("div", []))
 
-                    section["text"] = "\n".join(paragraphs)
-                    
-                    sections_list = fulltext.get("sections", [])
-                    if isinstance(sections_list, list):
-                        sections_list.append(section)
-                        fulltext["sections"] = sections_list
-
-        except Exception as e:
-            logger.error(f"Error extracting fulltext: {e}", exc_info=True)
         return fulltext
 
     def _extract_references(self, text_element: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Extract and parse references from the back matter."""
+        """Extract and parse references from the TEI back matter."""
         references = []
-        try:
-            back_matter = text_element.get("back", {})
-            if back_matter:
-                list_bibl = back_matter.get("div", {}).get("listBibl", {})
-                bibl_structs = list_bibl.get("biblStruct", [])
-                if not isinstance(bibl_structs, list):
-                    bibl_structs = [bibl_structs]
+        back_element = text_element.get("back", {})
+        if not back_element or not isinstance(back_element, dict):
+            return references
 
-                for bibl in bibl_structs:
-                    parsed_ref = self._parse_reference(bibl)
-                    if parsed_ref:
-                        references.append(parsed_ref)
-        except Exception as e:
-            logger.error(f"Error extracting references: {e}", exc_info=True)
+        ref_div = None
+        # Find the div that contains the list of references
+        for div in back_element.get("div", []):
+            if div.get("listBibl"):
+                ref_div = div
+                break
+
+        if not ref_div:
+            return references
+
+        list_bibl = ref_div.get("listBibl", {}).get("biblStruct", [])
+        if not isinstance(list_bibl, list):
+            list_bibl = [list_bibl]
+
+        for bibl_struct in list_bibl:
+            parsed_ref = self._parse_reference(bibl_struct)
+            if parsed_ref:
+                references.append(parsed_ref)
         return references
 
     def _parse_reference(self, bibl_struct: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Parse a single biblStruct element into a structured reference."""
-        try:
-            ref = {"raw_text": xmltodict.unparse({"biblStruct": bibl_struct}, full_xml_declaration=False)}
-            analytic = bibl_struct.get("analytic", {})
-            if analytic:
-                ref["title"] = analytic.get("title", {}).get("#text")
-                ref["authors"] = self._extract_authors(analytic)
-            
-            monogr = bibl_struct.get("monogr", {})
-            if monogr:
-                ref["journal"] = monogr.get("title", {}).get("#text")
-                imprint = monogr.get("imprint", {})
-                if imprint:
-                    ref["year"] = imprint.get("date", {}).get("@when")
-                    ref["volume"] = imprint.get("biblScope", {"@unit": "volume"}).get("#text")
-                    ref["issue"] = imprint.get("biblScope", {"@unit": "issue"}).get("#text")
-                    ref["pages"] = imprint.get("biblScope", {"@unit": "page"}).get("#text")
-
-            return ref
-        except Exception as e:
-            logger.error(f"Error parsing single reference: {e}", exc_info=True)
+        """Parse a single biblStruct into a structured reference."""
+        if not bibl_struct or not isinstance(bibl_struct, dict):
             return None
+
+        analytic = bibl_struct.get("analytic", {})
+        monogr = bibl_struct.get("monogr", {})
+
+        title = analytic.get("title", {}).get("#text")
+        year = monogr.get("imprint", {}).get("date", {}).get("@when")
+        authors = self._extract_authors_from_reference(analytic.get("author", []))
+
+        return {
+            "title": title,
+            "year": year,
+            "authors": authors,
+            "journal": monogr.get("title"),
+        }
+
+    def _extract_authors_from_reference(
+        self,
+        authors_data: List[Dict[str, Any]],
+    ) -> List[str]:
+        """Extract author names from a reference's author list."""
+        if not isinstance(authors_data, list):
+            authors_data = [authors_data]
+
+        names = []
+        for author in authors_data:
+            pers_name = author.get("persName", {})
+            if not pers_name:
+                continue
+            # Simplified name extraction for references
+            name_parts = []
+            forenames = pers_name.get("forename", [])
+            if not isinstance(forenames, list):
+                forenames = [forenames]
+            for fname in forenames:
+                name_parts.append(fname.get("#text", ""))
+            surname = pers_name.get("surname")
+            if surname:
+                name_parts.append(surname)
+            if name_parts:
+                names.append(" ".join(filter(None, name_parts)))
+        return names
+
+    def _stringify_divs(self, divs: List[Dict[str, Any]]) -> str:
+        """Recursively stringify divs into a single text block."""
+        if not isinstance(divs, list):
+            divs = [divs]
+
+        text_parts = []
+        for div in divs:
+            head = div.get("head", "")
+            if isinstance(head, dict):
+                head = head.get("#text", "")
+            if head:
+                text_parts.append(head)
+
+            paragraphs = div.get("p", [])
+            if not isinstance(paragraphs, list):
+                paragraphs = [paragraphs]
+            for p in paragraphs:
+                if isinstance(p, str):
+                    text_parts.append(p)
+                elif isinstance(p, dict):
+                    text_parts.append(p.get("#text", ""))
+        return "\n".join(text_parts)

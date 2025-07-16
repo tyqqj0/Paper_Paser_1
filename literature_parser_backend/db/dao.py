@@ -11,18 +11,18 @@ from typing import Any, Dict, List, Optional
 
 from bson import ObjectId
 
-from ..models import LiteratureModel, LiteratureSummaryDTO, PyObjectId
+from ..models import LiteratureModel, LiteratureSummaryDTO
 from .mongodb import literature_collection
 
 logger = logging.getLogger(__name__)
 
 
 class LiteratureDAO:
-    """Data Access Object for literature documents."""
+    """Data Access Object for literature collection."""
 
     def __init__(self) -> None:
-        """Initialize Literature DAO."""
-        self.collection = literature_collection
+        """Initialize DAO with database collection."""
+        self.collection = literature_collection()
 
     async def create_literature(self, literature: LiteratureModel) -> str:
         """
@@ -41,7 +41,7 @@ class LiteratureDAO:
             doc_data["updated_at"] = now
 
             # Insert document
-            result = await self.collection().insert_one(doc_data)
+            result = await self.collection.insert_one(doc_data)
             literature_id = str(result.inserted_id)
 
             logger.info(f"Created literature document with ID: {literature_id}")
@@ -66,12 +66,12 @@ class LiteratureDAO:
             object_id = ObjectId(literature_id)
 
             # Find document
-            doc = await self.collection().find_one({"_id": object_id})
+            doc = await self.collection.find_one({"_id": object_id})
             if not doc:
                 return None
 
             # Convert to model
-            return LiteratureModel.model_validate(doc)
+            return LiteratureModel(**doc)
 
         except Exception as e:
             logger.error(f"Failed to get literature by ID {literature_id}: {e}")
@@ -85,11 +85,11 @@ class LiteratureDAO:
         :return: Literature model or None if not found
         """
         try:
-            doc = await self.collection().find_one({"identifiers.doi": doi})
+            doc = await self.collection.find_one({"identifiers.doi": doi})
             if not doc:
                 return None
 
-            return LiteratureModel.model_validate(doc)
+            return LiteratureModel(**doc)
 
         except Exception as e:
             logger.error(f"Failed to find literature by DOI {doi}: {e}")
@@ -103,11 +103,11 @@ class LiteratureDAO:
         :return: Literature model or None if not found
         """
         try:
-            doc = await self.collection().find_one({"identifiers.arxiv_id": arxiv_id})
+            doc = await self.collection.find_one({"identifiers.arxiv_id": arxiv_id})
             if not doc:
                 return None
 
-            return LiteratureModel.model_validate(doc)
+            return LiteratureModel(**doc)
 
         except Exception as e:
             logger.error(f"Failed to find literature by ArXiv ID {arxiv_id}: {e}")
@@ -121,13 +121,13 @@ class LiteratureDAO:
         :return: Literature model or None if not found
         """
         try:
-            doc = await self.collection().find_one(
+            doc = await self.collection.find_one(
                 {"identifiers.fingerprint": fingerprint},
             )
             if not doc:
                 return None
 
-            return LiteratureModel.model_validate(doc)
+            return LiteratureModel(**doc)
 
         except Exception as e:
             logger.error(f"Failed to find literature by fingerprint {fingerprint}: {e}")
@@ -141,11 +141,11 @@ class LiteratureDAO:
         :return: Literature model or None if not found
         """
         try:
-            doc = await self.collection().find_one({"task_info.task_id": task_id})
+            doc = await self.collection.find_one({"task_info.task_id": task_id})
             if not doc:
                 return None
 
-            return LiteratureModel.model_validate(doc)
+            return LiteratureModel(**doc)
 
         except Exception as e:
             logger.error(f"Failed to find literature by task ID {task_id}: {e}")
@@ -153,61 +153,42 @@ class LiteratureDAO:
 
     async def search_literature(
         self,
-        query: Optional[str] = None,
+        query: str,
         limit: int = 20,
-        skip: int = 0,
-        sort_by: str = "created_at",
-        sort_order: int = -1,
+        offset: int = 0,
     ) -> List[LiteratureSummaryDTO]:
-        """
-        Search literature documents with text search and pagination.
-
-        :param query: Text search query (searches title and authors)
-        :param limit: Maximum number of results to return
-        :param skip: Number of results to skip (for pagination)
-        :param sort_by: Field to sort by
-        :param sort_order: Sort order (1 for ascending, -1 for descending)
-        :return: List of literature summary DTOs
-        """
-        try:
-            # Build query filter
-            filter_dict = {}
-            if query:
-                filter_dict["$text"] = {"$search": query}
-
-            # Execute query with pagination and sorting
-            cursor = (
-                self.collection()
-                .find(filter_dict)
-                .sort(sort_by, sort_order)
-                .skip(skip)
-                .limit(limit)
+        """Search for literature by title or other fields."""
+        # Simple text search for now; can be expanded to use more complex queries
+        # or a dedicated search index like Elasticsearch.
+        cursor = (
+            self.collection.find(
+                {"$text": {"$search": query}},
+                {
+                    "metadata.title": 1,
+                    "metadata.authors": 1,
+                    "metadata.year": 1,
+                    "identifiers.doi": 1,
+                    "created_at": 1,
+                },
             )
+            .limit(limit)
+            .skip(offset)
+        )
 
-            results = []
-            async for doc in cursor:
-                # Convert to summary DTO (exclude large content)
-                summary = LiteratureSummaryDTO(
-                    id=str(doc["_id"]),
-                    identifiers=doc["identifiers"],
-                    metadata=doc["metadata"],
-                    created_at=doc["created_at"],
-                    updated_at=doc["updated_at"],
-                    # The following fields are derived and will be populated
-                    # by the DTO's model_post_init method.
-                    # We provide default/empty values here to satisfy the constructor.
-                    content={},
-                    references=[],
-                    task_info=doc.get("task_info"),
-                )
-                results.append(summary)
-
-            logger.info(f"Found {len(results)} literature documents for query: {query}")
-            return results
-
-        except Exception as e:
-            logger.error(f"Failed to search literature: {e}")
-            return []
+        results = []
+        async for doc in cursor:
+            # Reconstruct a partial LiteratureModel to create the DTO
+            partial_literature = LiteratureModel(
+                _id=doc["_id"],
+                identifiers=doc.get("identifiers", {}),
+                metadata=doc.get("metadata", {}),
+                content={},  # Empty content for summary
+                references=[],  # Empty references for summary
+                created_at=doc.get("created_at"),
+                updated_at=doc.get("updated_at"),
+            )
+            results.append(literature_to_summary_dto(partial_literature))
+        return results
 
     async def update_literature(
         self,
@@ -229,7 +210,7 @@ class LiteratureDAO:
             updates["updated_at"] = datetime.now()
 
             # Update document
-            result = await self.collection().update_one(
+            result = await self.collection.update_one(
                 {"_id": object_id},
                 {"$set": updates},
             )
@@ -258,7 +239,7 @@ class LiteratureDAO:
             object_id = ObjectId(literature_id)
 
             # Delete document
-            result = await self.collection().delete_one({"_id": object_id})
+            result = await self.collection.delete_one({"_id": object_id})
 
             success = result.deleted_count > 0
             if success:
@@ -279,7 +260,7 @@ class LiteratureDAO:
         :return: Total count of documents
         """
         try:
-            count = await self.collection().count_documents({})
+            count = await self.collection.count_documents({})
             return count
         except Exception as e:
             logger.error(f"Failed to count literature documents: {e}")
@@ -298,9 +279,7 @@ class LiteratureDAO:
         return await self.search_literature(
             query=None,
             limit=limit,
-            skip=0,
-            sort_by="created_at",
-            sort_order=-1,
+            offset=0,
         )
 
     async def find_by_title(self, title: str) -> Optional[LiteratureModel]:
@@ -315,7 +294,7 @@ class LiteratureDAO:
             normalized_title = title.strip().lower()
 
             # Use regex for case-insensitive search
-            doc = await self.collection().find_one(
+            doc = await self.collection.find_one(
                 {
                     "metadata.title": {
                         "$regex": f"^{normalized_title}$",
@@ -327,7 +306,7 @@ class LiteratureDAO:
             if not doc:
                 return None
 
-            return LiteratureModel.model_validate(doc)
+            return LiteratureModel(**doc)
 
         except Exception as e:
             logger.error(f"Failed to find literature by title '{title}': {e}")
@@ -351,19 +330,15 @@ class LiteratureDAO:
             normalized_title = title.strip().lower()
 
             # Use MongoDB text search
-            cursor = (
-                self.collection()
-                .find(
-                    {"$text": {"$search": normalized_title}},
-                    {"score": {"$meta": "textScore"}},
-                )
-                .sort([("score", {"$meta": "textScore"})])
-            )
+            cursor = self.collection.find(
+                {"$text": {"$search": normalized_title}},
+                {"score": {"$meta": "textScore"}},
+            ).sort([("score", {"$meta": "textScore"})])
 
             async for doc in cursor:
                 # Check if the score meets our threshold
                 if doc.get("score", 0) >= similarity_threshold:
-                    return LiteratureModel.model_validate(doc)
+                    return LiteratureModel(**doc)
 
             return None
 

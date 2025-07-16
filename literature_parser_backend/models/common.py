@@ -1,36 +1,41 @@
-"""
-Common model components and utilities.
-"""
+"""Common model components and utilities."""
 
-from typing import Annotated, Any
+from typing import Any, ClassVar, Dict
 
 from bson import ObjectId
 from pydantic import (
-    BeforeValidator,
-    Field,
     GetJsonSchemaHandler,
-    PlainSerializer,
-    WithJsonSchema,
+    Field,
+    GetCoreSchemaHandler,
 )
 from pydantic.json_schema import JsonSchemaValue
-from pydantic_core import core_schema
+from pydantic_core import core_schema, CoreSchema
 
 
 class PyObjectId(ObjectId):
-    """
-    Custom ObjectId type for Pydantic v2.
+    """Custom Pydantic type for MongoDB's ObjectId."""
 
-    This class allows seamless integration between MongoDB's ObjectId
-    and Pydantic models, handling both serialization and validation.
-    """
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls,
+        core_schema: CoreSchema,
+        handler: GetJsonSchemaHandler,
+    ) -> Dict[str, Any]:
+        """Return JSON schema for ObjectId."""
+        json_schema = handler(core_schema)
+        json_schema.update(
+            type="string",
+            examples=["507f1f77bcf86cd799439011"],
+        )
+        return json_schema
 
     @classmethod
     def __get_pydantic_core_schema__(
         cls,
-        source_type: Any,
-        handler: GetJsonSchemaHandler,
-    ) -> core_schema.CoreSchema:
-        """Define the core schema for PyObjectId validation."""
+        source: Any,
+        handler: GetCoreSchemaHandler,
+    ) -> CoreSchema:
+        """Return Pydantic core schema."""
         return core_schema.json_or_python_schema(
             json_schema=core_schema.str_schema(),
             python_schema=core_schema.union_schema(
@@ -39,7 +44,9 @@ class PyObjectId(ObjectId):
                     core_schema.chain_schema(
                         [
                             core_schema.str_schema(),
-                            core_schema.no_info_plain_validator_function(cls.validate),
+                            core_schema.no_info_plain_validator_function(
+                                cls.validate_object_id,
+                            ),
                         ],
                     ),
                 ],
@@ -49,28 +56,24 @@ class PyObjectId(ObjectId):
             ),
         )
 
-    @classmethod
-    def validate(cls, value: Any) -> ObjectId:
-        """Validate and convert input to ObjectId."""
-        if isinstance(value, ObjectId):
-            return value
-        if isinstance(value, str):
-            try:
-                return ObjectId(value)
-            except Exception as e:
-                raise ValueError(f"Invalid ObjectId: {value}") from e
-        raise ValueError(f"Invalid type for ObjectId: {type(value)}")
+    @staticmethod
+    def validate_object_id(v: str) -> ObjectId:
+        """Validate string as ObjectId."""
+        if not ObjectId.is_valid(v):
+            raise ValueError("Invalid ObjectId")
+        return ObjectId(v)
 
-    @classmethod
-    def __get_pydantic_json_schema__(
-        cls,
-        core_schema: core_schema.CoreSchema,
-        handler: GetJsonSchemaHandler,
-    ) -> JsonSchemaValue:
-        """Define JSON schema for API documentation."""
-        return {
-            "type": "string",
-            "pattern": "^[0-9a-fA-F]{24}$",
-            "description": "MongoDB ObjectId as a 24-character hex string",
-            "example": "507f1f77bcf86cd799439011",
-        }
+
+def MongoId(
+    title: str = "Database ID",
+    description: str = "MongoDB document _id",
+    example: str = "507f1f77bcf86cd799439011",
+) -> Any:
+    """Create a Pydantic Field for a MongoDB ID."""
+    return Field(
+        default=None,
+        alias="_id",
+        title=title,
+        description=description,
+        json_schema_extra={"example": example},
+    )

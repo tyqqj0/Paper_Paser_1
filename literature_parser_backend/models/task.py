@@ -7,7 +7,7 @@ and communication between the API and background workers.
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, ClassVar, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -44,11 +44,11 @@ class TaskErrorInfo(BaseModel):
     error_message: str = Field(..., description="Human-readable error message")
     error_details: Optional[Dict[str, Any]] = Field(
         None,
-        description="Additional error details for debugging",
+        description="Detailed error information (e.g., API responses)",
     )
 
     class Config:
-        json_schema_extra = {
+        json_schema_extra: ClassVar[Dict[str, Any]] = {
             "example": {
                 "error_type": "ExternalAPIError",
                 "error_message": "Failed to fetch metadata from CrossRef API",
@@ -98,7 +98,7 @@ class TaskStatusDTO(BaseModel):
     )
 
     class Config:
-        json_schema_extra = {
+        json_schema_extra: ClassVar[Dict[str, Any]] = {
             "examples": [
                 {
                     "task_id": "a1b2-c3d4-e5f6-g7h8",
