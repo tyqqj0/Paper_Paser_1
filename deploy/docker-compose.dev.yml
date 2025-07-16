@@ -1,15 +1,56 @@
 services:
+  mongo:
+    image: mongo:latest
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=literature_parser_backend
+      - MONGO_INITDB_ROOT_PASSWORD=literature_parser_backend
+      - MONGO_INITDB_DATABASE=literature_parser
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "127.0.0.1:6380:6379"
+
+  grobid:
+    image: lfoppiano/grobid:0.8.0
+    ports:
+      - "8070:8070"
+
   api:
     build:
-      context: .
+      context: ..
       dockerfile: Dockerfile
     # Override command for development with auto-reload
     command: poetry run uvicorn literature_parser_backend.web.application:get_app --factory --host 0.0.0.0 --port 8000 --reload
+    depends_on:
+      - redis
+      - mongo
+    ports:
+      - "8088:8000"
+    environment:
+      - LITERATURE_PARSER_BACKEND_DB_HOST=mongo
+      - LITERATURE_PARSER_BACKEND_REDIS_HOST=redis
+      - LITERATURE_PARSER_BACKEND_SEMANTIC_SCHOLAR_API_KEY= # 在这里粘贴你的API密钥
+      - HTTP_PROXY=http://192.168.65.254:7890
+      - HTTPS_PROXY=http://192.168.65.254:7890
 
   worker:
     build:
-      context: .
+      context: ..
       dockerfile: Dockerfile
     # Override command for development with auto-reload
     command: poetry run celery -A literature_parser_backend.worker.celery_app worker --loglevel=debug --concurrency=1 --queues=literature
     dns: 8.8.8.8
+    depends_on:
+      - redis
+      - mongo
+      - grobid
+    environment:
+      - LITERATURE_PARSER_BACKEND_REDIS_HOST=redis
+      - LITERATURE_PARSER_BACKEND_DB_HOST=mongo
+      - LITERATURE_PARSER_BACKEND_GROBID_BASE_URL=http://grobid:8070
+      - LITERATURE_PARSER_BACKEND_SEMANTIC_SCHOLAR_API_KEY= # 在这里粘贴你的API密钥
+      - HTTP_PROXY=http://192.168.65.254:7890
+      - HTTPS_PROXY=http://192.168.65.254:7890

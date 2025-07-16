@@ -51,7 +51,8 @@ class GrobidClient:
         """
         try:
             response = self.session.get(
-                f"{self.base_url}{self.endpoints['is_alive']}", timeout=self.timeout,
+                f"{self.base_url}{self.endpoints['is_alive']}",
+                timeout=self.timeout,
             )
             return (
                 response.status_code == 200 and response.text.strip().lower() == "true"
@@ -69,7 +70,8 @@ class GrobidClient:
         """
         try:
             response = self.session.get(
-                f"{self.base_url}{self.endpoints['version']}", timeout=self.timeout,
+                f"{self.base_url}{self.endpoints['version']}",
+                timeout=self.timeout,
             )
             if response.status_code == 200:
                 return response.text.strip()
@@ -127,7 +129,10 @@ class GrobidClient:
 
         try:
             response = self.session.post(
-                url, files=files, data=form_data, timeout=self.timeout,
+                url,
+                files=files,
+                data=form_data,
+                timeout=self.timeout,
             )
 
             if response.status_code == 200:
@@ -170,7 +175,10 @@ class GrobidClient:
 
         try:
             response = self.session.post(
-                url, files=files, data=form_data, timeout=self.timeout,
+                url,
+                files=files,
+                data=form_data,
+                timeout=self.timeout,
             )
 
             if response.status_code == 200:
@@ -233,44 +241,48 @@ class GrobidClient:
     def _extract_header_metadata(self, tei_header: Dict) -> Dict[str, Any]:
         """Extract metadata from TEI header."""
         metadata = {}
-
         try:
-            file_desc = tei_header.get("fileDesc", {})
+            file_desc_list = tei_header.get("fileDesc", [])
+            file_desc = file_desc_list[0] if isinstance(file_desc_list, list) else file_desc_list
+            if not file_desc:
+                return {}
 
             # Extract title information
-            title_stmt = file_desc.get("titleStmt", {})
+            title_stmt_list = file_desc.get("titleStmt", [])
+            title_stmt = title_stmt_list[0] if isinstance(title_stmt_list, list) else title_stmt_list
             if title_stmt and "title" in title_stmt:
-                title = title_stmt["title"]
-                metadata["title"] = (
-                    title.get("#text", title) if isinstance(title, dict) else title
-                )
+                title_info = title_stmt["title"]
+                if isinstance(title_info, list):
+                    title_info = title_info[0]
+                metadata["title"] = title_info.get("#text") if isinstance(title_info, dict) else title_info
 
-            # Extract authors
-            source_desc = file_desc.get("sourceDesc", {})
+            # Extract publication information
+            publication_stmt_list = file_desc.get("publicationStmt", [])
+            publication_stmt = publication_stmt_list[0] if isinstance(publication_stmt_list, list) else publication_stmt_list
+            if publication_stmt:
+                publisher = publication_stmt.get("publisher")
+                if publisher:
+                    metadata["publisher"] = publisher
+
+                date_info = publication_stmt.get("date")
+                if date_info:
+                    if isinstance(date_info, list):
+                        date_info = date_info[0]
+                    if isinstance(date_info, dict):
+                        metadata["year"] = date_info.get("@when")
+
+            # Extract source description for authors
+            source_desc_list = file_desc.get("sourceDesc", [])
+            source_desc = source_desc_list[0] if isinstance(source_desc_list, list) else source_desc_list
             if source_desc:
                 bibl_struct = source_desc.get("biblStruct", {})
-                if bibl_struct and "analytic" in bibl_struct:
-                    metadata["authors"] = self._extract_authors(bibl_struct["analytic"])
-
-            # Extract abstract
-            profile_desc = tei_header.get("profileDesc", {})
-            if profile_desc and "abstract" in profile_desc:
-                abstract_text = profile_desc["abstract"].get("#text", "")
-                metadata["abstract"] = abstract_text
-
-            # Extract keywords
-            if profile_desc and "textClass" in profile_desc:
-                keywords = []
-                terms = profile_desc["textClass"].get("keywords", {}).get("term", [])
-                if isinstance(terms, list):
-                    keywords.extend(terms)
-                elif terms:
-                    keywords.append(terms)
-                metadata["keywords"] = keywords
+                if bibl_struct:
+                    analytic = bibl_struct.get("analytic", {})
+                    if analytic:
+                        metadata["authors"] = self._extract_authors(analytic)
 
         except Exception as e:
             logger.error(f"Error extracting header metadata from TEI: {e}")
-
         return metadata
 
     def _extract_authors(self, analytic: Dict) -> list:
@@ -280,73 +292,110 @@ class GrobidClient:
         if not isinstance(author_list, list):
             author_list = [author_list]
 
-        for author_node in author_list:
-            pers_name = author_node.get("persName", {})
+        for author_entry in author_list:
+            if not isinstance(author_entry, dict):
+                continue
+            pers_name = author_entry.get("persName", {})
             if not pers_name:
                 continue
 
-            author = {
-                "full_name": "",
-                "given_name": pers_name.get("forename", {}).get("#text", ""),
-                "surname": pers_name.get("surname", ""),
-                "email": author_node.get("email", ""),
-                "affiliations": [],
-            }
-            author["full_name"] = f"{author['given_name']} {author['surname']}".strip()
+            forenames = pers_name.get("forename", [])
+            if not isinstance(forenames, list):
+                forenames = [forenames]
 
-            # Extract affiliations
-            aff_nodes = author_node.get("affiliation", [])
-            if not isinstance(aff_nodes, list):
-                aff_nodes = [aff_nodes]
+            given_names = " ".join(
+                [
+                    name.get("#text") if isinstance(name, dict) else name
+                    for name in forenames
+                ],
+            )
 
-            for aff_node in aff_nodes:
-                org_names = aff_node.get("orgName", [])
-                if not isinstance(org_names, list):
-                    org_names = [org_names]
-                author["affiliations"].extend(
-                    [org.get("#text", "") for org in org_names if org.get("#text")],
-                )
-            authors.append(author)
+            surname = pers_name.get("surname", "")
+            if isinstance(surname, dict):
+                surname = surname.get("#text", "")
+
+            full_name = f"{given_names} {surname}".strip()
+            if full_name:
+                authors.append({"name": full_name})
         return authors
 
     def _extract_fulltext(self, text_element: Dict) -> Dict[str, Any]:
-        """Extract fulltext from TEI body."""
-        fulltext = {"body": "", "sections": []}
+        """Extract abstract and body from TEI text element."""
+        fulltext = {}
         try:
-            body = text_element.get("body", {})
-            if body:
-                divs = body.get("div", [])
+            # Handle abstract
+            front_element_list = text_element.get("front", [])
+            front_element = front_element_list[0] if isinstance(front_element_list, list) else front_element_list
+            if front_element:
+                div_abstract = front_element.get("div", {})
+                if isinstance(div_abstract, list):
+                    div_abstract = next(
+                        (item for item in div_abstract if item.get("@type") == "abstract"),
+                        {},
+                    )
+                if div_abstract.get("@type") == "abstract":
+                    abstract_p = div_abstract.get("p")
+                    if isinstance(abstract_p, dict):
+                        fulltext["abstract"] = abstract_p.get("#text")
+                    elif isinstance(abstract_p, str):
+                        fulltext["abstract"] = abstract_p
+
+            # Handle body
+            body_element = text_element.get("body", {})
+            if body_element:
+                sections = []
+                divs = body_element.get("div", [])
                 if not isinstance(divs, list):
                     divs = [divs]
-
                 for div in divs:
-                    head = div.get("head", {})
-                    title = head.get("#text", f"Section {head.get('@n', '')}")
-                    paragraphs = [p for p in div.get("p", [])]
-                    fulltext["sections"].append(
-                        {"title": title, "paragraphs": paragraphs},
+                    if not isinstance(div, dict):
+                        continue
+                    section_title = div.get("head", {}).get("#text", "")
+                    paragraphs = []
+                    ps = div.get("p", [])
+                    if not isinstance(ps, list):
+                        ps = [ps]
+                    for p in ps:
+                        if isinstance(p, dict):
+                            paragraphs.append(p.get("#text", ""))
+                        elif isinstance(p, str):
+                            paragraphs.append(p)
+                    sections.append(
+                        {"title": section_title, "text": "\n".join(paragraphs)},
                     )
-                    fulltext["body"] += "\n".join(paragraphs) + "\n"
+                fulltext["body"] = sections
+
         except Exception as e:
             logger.error(f"Error extracting fulltext from TEI: {e}")
         return fulltext
 
     def _extract_references(self, text_element: Dict) -> list:
-        """Extract references from TEI back section."""
+        """Extract references from TEI back element."""
         references = []
         try:
-            back = text_element.get("back", {})
-            if back:
-                div = back.get("div", {})
-                if div and div.get("@type") == "references":
-                    bibl_list = div.get("listBibl", {}).get("biblStruct", [])
-                    if not isinstance(bibl_list, list):
-                        bibl_list = [bibl_list]
+            back_element_list = text_element.get("back", [])
+            back_element = back_element_list[0] if isinstance(back_element_list, list) else back_element_list
+            if not back_element:
+                return []
 
-                    for bibl in bibl_list:
-                        ref = self._parse_reference(bibl)
-                        if ref:
-                            references.append(ref)
+            div_element_list = back_element.get("div", [])
+            div_element = div_element_list[0] if isinstance(div_element_list, list) else div_element_list
+            if not div_element or div_element.get("@type") != "references":
+                return []
+
+            list_bibl = div_element.get("listBibl", {})
+            bibl_structs = list_bibl.get("biblStruct", [])
+            if not isinstance(bibl_structs, list):
+                bibl_structs = [bibl_structs]
+
+            for bibl in bibl_structs:
+                if not isinstance(bibl, dict):
+                    continue
+                parsed_ref = self._parse_reference(bibl)
+                if parsed_ref:
+                    references.append(
+                        {"raw_text": str(bibl), "parsed": parsed_ref, "source": "GROBID"},
+                    )
         except Exception as e:
             logger.error(f"Error extracting references from TEI: {e}")
         return references

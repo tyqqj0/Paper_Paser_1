@@ -71,7 +71,11 @@ def test_task_result():
         # 检查Redis中的任务结果
         cmd = f'docker exec literature_parser_backend-redis-1 redis-cli GET "celery-task-meta-{task_id}"'
         result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, check=False,
+            cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            check=False,
         )
 
         if result.returncode == 0 and result.stdout.strip():

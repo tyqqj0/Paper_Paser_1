@@ -12,7 +12,6 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import pymongo
-from bson import ObjectId
 from celery import current_task
 
 from ..models import (
@@ -143,7 +142,7 @@ def extract_authoritative_identifiers(
         # Assuming authors is a list of dicts with 'name'
         authors_list = source.get("authors", [])
         authors_str = ", ".join(
-            [author.get("name", "") for author in authors_list if author]
+            [author.get("name", "") for author in authors_list if author],
         )
         year = source.get("year", "")
 
@@ -247,7 +246,7 @@ def fetch_references_waterfall(
 
         except Exception as e:
             logger.warning(
-                f"Semantic Scholar API for references failed: {e}. Will try GROBID fallback."
+                f"Semantic Scholar API for references failed: {e}. Will try GROBID fallback.",
             )
 
     # Fallback to GROBID if Semantic Scholar fails and we have PDF
@@ -256,12 +255,14 @@ def fetch_references_waterfall(
             update_task_status("正在解析PDF参考文献", 70, "使用GROBID解析PDF参考文献")
             logger.info("Falling back to GROBID for reference extraction")
             # Corrected to use process_pdf which is the actual method in GrobidClient
-            grobid_data = grobid_client.process_pdf(pdf_content, include_raw_citations=True)
+            grobid_data = grobid_client.process_pdf(
+                pdf_content, include_raw_citations=True,
+            )
             if grobid_data and grobid_data.get("references"):
                 raw_data["grobid_refs"] = grobid_data["references"]
                 references = convert_grobid_references(grobid_data["references"])
                 logger.info(
-                    f"Successfully extracted {len(references)} references from GROBID"
+                    f"Successfully extracted {len(references)} references from GROBID",
                 )
         except Exception as e:
             logger.error(f"GROBID fallback for references failed: {e}")
@@ -272,21 +273,17 @@ def fetch_references_waterfall(
 def convert_crossref_to_metadata(crossref_data: Dict[str, Any]) -> MetadataModel:
     """Converts CrossRef API response to a standardized MetadataModel."""
     message = crossref_data.get("message", {})
-    authors = [
-        AuthorModel(name=f"{author.get('given', '')} {author.get('family', '')}".strip())
-        for author in message.get("author", [])
-        if author
-    ]
-    title = message.get("title", [None])[0]
-    journal = message.get("container-title", [None])[0]
-    published_date = message.get("published-print") or message.get("published-online")
-    year = published_date.get("date-parts", [[None]])[0][0] if published_date else None
-
+    authors = []
+    if "author" in crossref_data:
+        for author in crossref_data["author"]:
+            author_name = f"{author.get('given', '')} {author.get('family', '')}".strip()
+            if author_name:
+                authors.append(AuthorModel(name=author_name))
     return MetadataModel(
-        title=title,
+        title=crossref_data.get("title", [""])[0],
         authors=authors,
-        year=year,
-        journal=journal,
+        year=message.get("published-print") or message.get("published-online"),
+        journal=message.get("container-title", [None])[0],
         abstract=message.get("abstract"),
         source_of_data=["crossref"],
     )
@@ -294,11 +291,13 @@ def convert_crossref_to_metadata(crossref_data: Dict[str, Any]) -> MetadataModel
 
 def convert_semantic_scholar_to_metadata(s2_data: Dict[str, Any]) -> MetadataModel:
     """Converts Semantic Scholar API response to a standardized MetadataModel."""
-    authors = [
-        AuthorModel(name=author.get("name", "").strip())
-        for author in s2_data.get("authors", [])
-        if author
-    ]
+    authors = []
+    if "authors" in s2_data:
+        for author in s2_data["authors"]:
+            if author and author.get("name"):
+                authors.append(
+                    AuthorModel(name=author["name"], s2_id=author.get("authorId")),
+                )
     return MetadataModel(
         title=s2_data.get("title"),
         authors=authors,
@@ -318,17 +317,11 @@ def convert_grobid_to_metadata(grobid_data: Dict[str, Any]) -> MetadataModel:
     title = title_stmt.get("title", {}).get("#text")
 
     authors = []
-    source_desc = file_desc.get("sourceDesc", {}).get("biblStruct", {})
-    analytic = source_desc.get("analytic", {})
-    author_list = analytic.get("author", [])
-    if not isinstance(author_list, list):
-        author_list = [author_list]
-
-    for author in author_list:
-        pers_name = author.get("persName", {})
-        forename = pers_name.get("forename", {}).get("#text", "")
-        surname = pers_name.get("surname", {}).get("#text", "")
-        authors.append(AuthorModel(name=f"{forename} {surname}".strip()))
+    if "authors" in grobid_data:
+        for author in grobid_data["authors"]:
+            full_name = author.get("name")
+            if full_name:
+                authors.append(AuthorModel(name=full_name))
 
     publication_stmt = file_desc.get("publicationStmt", {})
     date_info = publication_stmt.get("date", {})
@@ -354,29 +347,30 @@ def convert_semantic_scholar_references(
     """Converts Semantic Scholar references to a list of ReferenceModels."""
     references = []
     for ref in s2_refs:
-        if not ref or not ref.get("title"):
+        # s2_refs from get_references is a list of dicts, where each dict
+        # has 'citedPaper' which contains the actual paper details.
+        paper_details = ref.get("citedPaper", {})
+        if not paper_details:
             continue
 
         authors = [
-            AuthorModel(name=author.get("name", "").strip())
-            for author in ref.get("authors", [])
-            if author
+            AuthorModel(name=author["name"])
+            for author in paper_details.get("authors", [])
+            if author and author.get("name")
         ]
-        identifiers = IdentifiersModel(
-            doi=ref.get("doi"),
-            arxiv_id=ref.get("arxivId"),
-            semantic_scholar_id=ref.get("paperId"),
-        )
-        references.append(
-            ReferenceModel(
-                title=ref.get("title"),
-                authors=authors,
-                year=ref.get("year"),
-                journal=ref.get("venue"),
-                identifiers=identifiers,
-                source_of_data=["semantic_scholar"],
-            )
-        )
+        parsed_data = {
+            "title": paper_details.get("title"),
+            "authors": authors,
+            "year": paper_details.get("year"),
+            "journal": paper_details.get("venue"),
+            "identifiers": IdentifiersModel(
+                doi=paper_details.get("doi"),
+                arxiv_id=paper_details.get("arxivId"),
+                semantic_scholar_id=paper_details.get("paperId"),
+            ),
+            "source_of_data": ["semantic_scholar"],
+        }
+        references.append(ReferenceModel(**parsed_data))
     return references
 
 
@@ -386,7 +380,9 @@ def convert_grobid_references(
     """Converts GROBID parsed references to a list of ReferenceModels."""
     # This is a placeholder. GROBID's reference output is complex (TEI XML).
     # A full implementation requires a dedicated TEI XML parser.
-    logger.warning("GROBID reference parsing is a placeholder and not fully implemented.")
+    logger.warning(
+        "GROBID reference parsing is a placeholder and not fully implemented.",
+    )
     return []
 
 
@@ -413,12 +409,15 @@ def _process_literature_sync(task_id: str, source: Dict[str, Any]) -> str:
             try:
                 # Assuming ContentFetcher is adapted to be sync
                 from .content_fetcher import ContentFetcher
+
                 content_fetcher = ContentFetcher(settings)
                 # This needs to be a synchronous method call
                 pdf_content = content_fetcher.fetch_pdf_from_arxiv_id(
-                    identifiers.arxiv_id
+                    identifiers.arxiv_id,
                 )
-                logger.info(f"Successfully downloaded PDF from ArXiv. Size: {len(pdf_content)} bytes")
+                logger.info(
+                    f"Successfully downloaded PDF from ArXiv. Size: {len(pdf_content)} bytes",
+                )
             except Exception as e:
                 logger.error(f"Failed to download PDF: {e}")
                 update_task_status("PDF下载失败", 15, f"错误: {e}")
@@ -426,16 +425,13 @@ def _process_literature_sync(task_id: str, source: Dict[str, Any]) -> str:
         content = ContentModel(
             pdf_content_available=bool(pdf_content),
             # pdf_content is not stored in DB model
-            xml_content_available=False, # GROBID XML can be stored if needed
+            xml_content_available=False,  # GROBID XML can be stored if needed
             source_of_data=["arxiv_pdf_downloader" if pdf_content else "none"],
         )
 
-
         # Step 3: Fetch metadata
         update_task_status("获取元数据", 20)
-        metadata, metadata_raw_data = fetch_metadata_waterfall(
-            identifiers, pdf_content
-        )
+        metadata, metadata_raw_data = fetch_metadata_waterfall(identifiers, pdf_content)
         if not metadata:
             logger.warning("Metadata could not be fetched. Creating fallback metadata.")
             title = source.get("title", "Unknown Title")
@@ -455,7 +451,7 @@ def _process_literature_sync(task_id: str, source: Dict[str, Any]) -> str:
         # Step 4: Fetch references
         update_task_status("获取参考文献", 65)
         references, references_raw_data = fetch_references_waterfall(
-            identifiers, pdf_content
+            identifiers, pdf_content,
         )
         logger.info(f"Fetched {len(references)} references.")
 
@@ -467,8 +463,13 @@ def _process_literature_sync(task_id: str, source: Dict[str, Any]) -> str:
             task_id=task_id,
             created_at=datetime.now(),
             # Simplified stages
-            processing_stages=["identifier_extraction", "metadata_fetch", "reference_fetch", "data_integration"],
-            total_processing_time=0, # Placeholder
+            processing_stages=[
+                "identifier_extraction",
+                "metadata_fetch",
+                "reference_fetch",
+                "data_integration",
+            ],
+            total_processing_time=0,  # Placeholder
             success=True,
         )
 
@@ -499,17 +500,19 @@ def _process_literature_sync(task_id: str, source: Dict[str, Any]) -> str:
             literature_id = f"failed_to_save_{task_id[:8]}"
             logger.warning(f"Returning placeholder literature ID: {literature_id}")
 
-
         update_task_status("完成", 100, f"文献ID: {literature_id}")
 
         return {
-            "literature_id": str(literature_id), # Ensure it's a string
+            "literature_id": str(literature_id),  # Ensure it's a string
             "status": "success",
             "message": f"Successfully processed and saved literature {literature_id}",
         }
 
     except Exception as e:
-        logger.error(f"Unhandled error in literature processing pipeline for task {task_id}: {e}", exc_info=True)
+        logger.error(
+            f"Unhandled error in literature processing pipeline for task {task_id}: {e}",
+            exc_info=True,
+        )
         update_task_status("失败", 100, f"错误: {e!s}")
         # Re-raise the exception to mark the Celery task as FAILED
         raise
@@ -528,7 +531,7 @@ def process_literature_task(self, source: Dict[str, Any]) -> Dict[str, Any]:
     """
     try:
         return _process_literature_sync(self.request.id, source)
-    except Exception as e:
+    except Exception:
         # The exception is already logged in the sync function
         # Celery will automatically mark the task as failed
         raise  # Re-raising is important for Celery to see the failure

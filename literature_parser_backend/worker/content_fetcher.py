@@ -177,7 +177,7 @@ class ContentFetcher:
             PDF content as bytes or None if failed
         """
         try:
-            response = requests.get(url, timeout=30)
+            response = requests.get(url, timeout=self.settings.external_api_timeout)
             response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
 
             content_type = response.headers.get("content-type", "").lower()

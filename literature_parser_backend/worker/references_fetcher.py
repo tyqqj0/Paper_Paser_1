@@ -120,6 +120,7 @@ class ReferencesFetcher:
             # Use the get_references method directly
             references_data = self.semantic_scholar_client.get_references(
                 identifier,
+                id_type=id_type,
                 limit=50,
             )
 

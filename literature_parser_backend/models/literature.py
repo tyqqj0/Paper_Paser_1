@@ -21,12 +21,12 @@ from .common import PyObjectId
 class AuthorModel(BaseModel):
     """Author information within a literature."""
 
-    full_name: str = Field(..., description="Complete author name")
-    sequence: str = Field(..., description="Author sequence (first, additional)")
+    name: str = Field(..., description="Author name")
+    s2_id: Optional[str] = Field(None, description="Semantic Scholar Author ID")
 
     class Config:
         json_schema_extra = {
-            "example": {"full_name": "Ashish Vaswani", "sequence": "first"},
+            "example": {"name": "Ashish Vaswani", "s2_id": "1738948"},
         }
 
 
@@ -69,8 +69,8 @@ class MetadataModel(BaseModel):
             "example": {
                 "title": "Attention Is All You Need",
                 "authors": [
-                    {"full_name": "Ashish Vaswani", "sequence": "first"},
-                    {"full_name": "Noam Shazeer", "sequence": "additional"},
+                    {"name": "Ashish Vaswani"},
+                    {"name": "Noam Shazeer"},
                 ],
                 "year": 2017,
                 "journal": "Advances in Neural Information Processing Systems",
@@ -193,7 +193,7 @@ class LiteratureModel(BaseModel):
                 },
                 "metadata": {
                     "title": "Attention Is All You Need",
-                    "authors": [{"full_name": "Ashish Vaswani", "sequence": "first"}],
+                    "authors": [{"name": "Ashish Vaswani"}],
                     "year": 2017,
                 },
                 "content": {"pdf_url": "https://arxiv.org/pdf/1706.03762.pdf"},
@@ -433,7 +433,7 @@ class LiteratureSummaryDTO(BaseModel):
                 "identifiers": {"doi": "10.48550/arXiv.1706.03762"},
                 "metadata": {
                     "title": "Attention Is All You Need",
-                    "authors": [{"full_name": "Ashish Vaswani", "sequence": "first"}],
+                    "authors": [{"name": "Ashish Vaswani"}],
                     "year": 2017,
                 },
                 "content": {
