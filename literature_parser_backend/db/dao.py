@@ -284,30 +284,19 @@ class LiteratureDAO:
 
     async def find_by_title(self, title: str) -> Optional[LiteratureModel]:
         """
-        Find literature by title (case-insensitive, fuzzy matching).
+        Find literature by exact title match (case-insensitive).
 
-        :param title: Literature title to search for
+        :param title: Title to search for
         :return: Literature model or None if not found
         """
         try:
-            # Normalize title for better matching
-            normalized_title = title.strip().lower()
-
-            # Use regex for case-insensitive search
+            # Case-insensitive exact match
             doc = await self.collection.find_one(
-                {
-                    "metadata.title": {
-                        "$regex": f"^{normalized_title}$",
-                        "$options": "i",
-                    },
-                },
+                {"metadata.title": {"$regex": f"^{title}$", "$options": "i"}},
             )
-
             if not doc:
                 return None
-
             return LiteratureModel(**doc)
-
         except Exception as e:
             logger.error(f"Failed to find literature by title '{title}': {e}")
             return None
@@ -318,30 +307,34 @@ class LiteratureDAO:
         similarity_threshold: float = 0.8,
     ) -> Optional[LiteratureModel]:
         """
-        Find literature by title with fuzzy matching.
+        Find literature by fuzzy title match using text search score.
 
-        :param title: Literature title to search for
+        This requires a text index on 'metadata.title'.
+
+        :param title: Title to search for
         :param similarity_threshold: Minimum similarity score (0.0 to 1.0)
         :return: Literature model or None if not found
         """
         try:
-            # For simple fuzzy matching, we'll use text search
-            # In production, you might want to use more sophisticated algorithms
-            normalized_title = title.strip().lower()
-
-            # Use MongoDB text search
+            # Use text search and sort by score
             cursor = self.collection.find(
-                {"$text": {"$search": normalized_title}},
+                {"$text": {"$search": title}},
                 {"score": {"$meta": "textScore"}},
             ).sort([("score", {"$meta": "textScore"})])
 
-            async for doc in cursor:
-                # Check if the score meets our threshold
-                if doc.get("score", 0) >= similarity_threshold:
-                    return LiteratureModel(**doc)
+            # Get the best match
+            best_match = await cursor.next() if cursor.fetch_next else None
+
+            if not best_match:
+                return None
+
+            # Normalize scores or use another similarity metric if needed
+            # For simplicity, we just check if the score is above a threshold.
+            # MongoDB's textScore is not normalized, so this is a rough measure.
+            if best_match["score"] > similarity_threshold:
+                return LiteratureModel(**best_match)
 
             return None
-
         except Exception as e:
-            logger.error(f"Failed to find literature by fuzzy title '{title}': {e}")
+            logger.error(f"Fuzzy title search failed for '{title}': {e}")
             return None

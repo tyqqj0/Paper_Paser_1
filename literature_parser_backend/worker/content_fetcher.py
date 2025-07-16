@@ -6,7 +6,8 @@ following the three-step process outlined in the architecture document.
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+import os
+from typing import Any, Dict, Optional, Tuple
 
 import requests
 
@@ -75,6 +76,43 @@ class ContentFetcher:
             response = self.client.get(url)
             response.raise_for_status()
             logger.info(f"Successfully downloaded PDF: {len(response.content)} bytes.")
+
+            # 调试步骤一：保存PDF到临时位置以便检查
+            try:
+                debug_dir = "/tmp/debug_pdfs"
+                os.makedirs(debug_dir, exist_ok=True)
+
+                # 从URL中提取文件名
+                import urllib.parse
+                from datetime import datetime
+
+                parsed_url = urllib.parse.urlparse(url)
+                filename = os.path.basename(parsed_url.path) or "unknown.pdf"
+                if not filename.endswith(".pdf"):
+                    filename += ".pdf"
+
+                # 添加时间戳避免冲突
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                debug_filename = f"{timestamp}_{filename}"
+                debug_path = os.path.join(debug_dir, debug_filename)
+
+                with open(debug_path, "wb") as f:
+                    f.write(response.content)
+
+                logger.info(f"DEBUG: PDF saved to {debug_path} for inspection")
+                logger.info(f"DEBUG: File size: {len(response.content)} bytes")
+
+                # 简单验证PDF头部
+                if response.content.startswith(b"%PDF-"):
+                    logger.info("DEBUG: PDF header verification PASSED")
+                else:
+                    logger.warning(
+                        "DEBUG: PDF header verification FAILED - not a valid PDF",
+                    )
+
+            except Exception as e:
+                logger.error(f"DEBUG: Failed to save PDF for debugging: {e}")
+
             return response.content
         except requests.HTTPError as e:
             logger.error(

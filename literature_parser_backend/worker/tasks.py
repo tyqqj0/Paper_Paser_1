@@ -6,14 +6,14 @@ the intelligent hybrid workflow for gathering metadata and references.
 """
 
 import hashlib
+import json
 import logging
 import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import pymongo
-import requests
-from celery import Task, current_task, states
+from celery import Task, current_task
 from pymongo.mongo_client import MongoClient
 
 from ..models.literature import (
@@ -208,6 +208,9 @@ def _fetch_from_grobid(
         return None, None
     try:
         grobid_client = GrobidClient()
+        # Ensure no proxy is used for internal services
+        grobid_client.session.proxies = {"http": None, "https": None}
+
         header_content = grobid_client.process_header_only(pdf_content)
         if header_content and header_content.get("TEI"):
             metadata = convert_grobid_to_metadata(header_content)
@@ -311,11 +314,17 @@ def fetch_references_waterfall(
         try:
             update_task_status("正在解析PDF参考文献", 70, "使用GROBID解析PDF参考文献")
             logger.info("Falling back to GROBID for reference extraction")
-            # Corrected to use process_pdf which is the actual method in GrobidClient
+
+            grobid_client = GrobidClient()
             grobid_data = grobid_client.process_pdf(
                 pdf_content,
+                service="process_fulltext",
                 include_raw_citations=True,
             )
+
+            # 直接打印原始GROBID数据
+            logger.info(f"GROBID_RAW_DATA: {json.dumps(grobid_data, indent=2)}")
+
             if grobid_data and grobid_data.get("references"):
                 raw_data["grobid_refs"] = grobid_data["references"]
                 references = convert_grobid_references(grobid_data["references"])
@@ -481,7 +490,6 @@ def _process_literature_sync(task_id: str, source: Dict[str, Any]) -> str:
     """
     logger.info(f"Starting literature processing for task_id: {task_id}")
     update_task_status(
-        task_id,
         "任务开始",
         0,
         f"正在处理来源: {source.get('url') or source}",
@@ -490,7 +498,6 @@ def _process_literature_sync(task_id: str, source: Dict[str, Any]) -> str:
     try:
         # Step 1: Identifier Extraction
         update_task_status(
-            task_id,
             "提取标识符",
             5,
             "从来源URL或数据中提取DOI/ArXiv ID",
@@ -506,32 +513,20 @@ def _process_literature_sync(task_id: str, source: Dict[str, Any]) -> str:
         )
 
         # Step 2: Content Fetching (download PDF)
-        update_task_status(task_id, "下载PDF", 10)
-        pdf_content: Optional[bytes] = None
+        update_task_status("下载PDF", 10)
         content_fetcher = ContentFetcher()
         content_model, content_raw_data = content_fetcher.fetch_content_waterfall(
             doi=identifiers.doi,
             arxiv_id=identifiers.arxiv_id,
             user_pdf_url=effective_source.get("pdf_url"),
         )
+
+        pdf_content: Optional[bytes] = None
         if content_model.pdf_url:
-            try:
-                # This is a simplification; in a real scenario, you'd stream
-                # the content from the URL to avoid loading large files into memory.
-                response = requests.get(content_model.pdf_url, timeout=120)
-                response.raise_for_status()
-                pdf_content = response.content
-                logger.info(
-                    "Successfully downloaded PDF from "
-                    f"{content_model.pdf_url}. Size: {len(pdf_content)} bytes",
-                )
-            except Exception as e:
-                logger.error(
-                    f"Failed to download PDF from {content_model.pdf_url}: {e}",
-                )
+            pdf_content = content_fetcher._download_pdf(content_model.pdf_url)
 
         # Step 3: Fetch metadata
-        update_task_status(task_id, "获取元数据", 20)
+        update_task_status("获取元数据", 20)
         metadata, metadata_raw_data = fetch_metadata_waterfall(
             identifiers,
             pdf_content,
@@ -543,7 +538,7 @@ def _process_literature_sync(task_id: str, source: Dict[str, Any]) -> str:
         logger.info(f"Successfully fetched metadata with title: {metadata.title}")
 
         # Step 4: Fetch references
-        update_task_status(task_id, "获取参考文献", 65)
+        update_task_status("获取参考文献", 65)
         references, references_raw_data = fetch_references_waterfall(
             identifiers,
             pdf_content,
@@ -551,7 +546,7 @@ def _process_literature_sync(task_id: str, source: Dict[str, Any]) -> str:
         logger.info(f"Fetched {len(references)} references.")
 
         # Step 5: Data integration
-        update_task_status(task_id, "整合数据", 80)
+        update_task_status("整合数据", 80)
 
         # Step 6: Create task info
         task_info = TaskInfoModel(
@@ -571,7 +566,7 @@ def _process_literature_sync(task_id: str, source: Dict[str, Any]) -> str:
         )
 
         # Step 8: Save to database
-        update_task_status(task_id, "保存到数据库", 90)
+        update_task_status("保存到数据库", 90)
         literature_id = _save_literature_sync(literature, settings)
         logger.info(f"Literature saved to MongoDB with ID: {literature_id}")
 
@@ -582,17 +577,8 @@ def _process_literature_sync(task_id: str, source: Dict[str, Any]) -> str:
             f"Unhandled error in literature processing task {task_id}: {e}",
             exc_info=True,
         )
-        # Ensure the task is marked as failed on unhandled exceptions
-        current_task = process_literature_task.AsyncResult(task_id)
-        current_task.update_state(
-            state=states.FAILURE,
-            meta={
-                "exc_type": type(e).__name__,
-                "exc_message": str(e),
-                "details": "An unexpected error occurred during processing.",
-            },
-        )
-        raise  # Re-raise the exception to be handled by Celery
+        # Re-raise the exception to be handled by Celery
+        raise
 
 
 @celery_app.task(bind=True, name="process_literature_task")

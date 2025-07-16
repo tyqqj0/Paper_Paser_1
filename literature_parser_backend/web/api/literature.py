@@ -8,7 +8,7 @@ from loguru import logger
 
 from literature_parser_backend.db.dao import LiteratureDAO
 from literature_parser_backend.models.literature import (
-    LiteratureCreateDTO,
+    LiteratureCreateRequestDTO,
     LiteratureFulltextDTO,
     LiteratureModel,
     LiteratureSummaryDTO,
@@ -151,7 +151,7 @@ def _extract_convenience_fields(literature: LiteratureModel) -> Dict[str, Any]:
 
 @router.post("", summary="Submit literature for processing")
 async def create_literature(
-    literature_data: LiteratureCreateDTO,
+    literature_data: LiteratureCreateRequestDTO,
 ) -> JSONResponse:
     """
     Submit a literature processing request.
