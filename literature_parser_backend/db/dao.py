@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class LiteratureDAO:
     """Data Access Object for literature documents."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize Literature DAO."""
         self.collection = literature_collection
 
@@ -153,7 +153,7 @@ class LiteratureDAO:
 
     async def search_literature(
         self,
-        query: str = None,
+        query: Optional[str] = None,
         limit: int = 20,
         skip: int = 0,
         sort_by: str = "created_at",
@@ -188,12 +188,17 @@ class LiteratureDAO:
             async for doc in cursor:
                 # Convert to summary DTO (exclude large content)
                 summary = LiteratureSummaryDTO(
-                    id=PyObjectId(doc["_id"]),
+                    id=str(doc["_id"]),
                     identifiers=doc["identifiers"],
                     metadata=doc["metadata"],
-                    reference_count=len(doc.get("references", [])),
                     created_at=doc["created_at"],
                     updated_at=doc["updated_at"],
+                    # The following fields are derived and will be populated
+                    # by the DTO's model_post_init method.
+                    # We provide default/empty values here to satisfy the constructor.
+                    content={},
+                    references=[],
+                    task_info=doc.get("task_info"),
                 )
                 results.append(summary)
 

@@ -1,13 +1,19 @@
-### Python template
+# Git
+.git
+.gitignore
 
-deploy/
+# Docker
+.dockerignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDEs
 .idea/
 .vscode/
-.git/
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
 
 # C extensions
 *.so
@@ -142,3 +148,8 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+
+# Project specific
+.claude/
+tests/

@@ -84,11 +84,15 @@ class MetadataModel(BaseModel):
 class ContentModel(BaseModel):
     """Literature content and parsing information."""
 
-    pdf_url: Optional[str] = Field(None, description="URL to the PDF file")
-    source_page_url: Optional[str] = Field(None, description="Original source page URL")
+    pdf_url: Optional[str] = Field(default=None, description="URL to the PDF file")
+    source_page_url: Optional[str] = Field(default=None, description="Original source page URL")
     parsed_fulltext: Optional[Dict[str, Any]] = Field(
-        None,
+        default=None,
         description="GROBID parsed fulltext (large JSON object, excluded from summary APIs)",
+    )
+    sources_tried: List[str] = Field(
+        default_factory=list,
+        description="List of URLs or methods tried for content fetching.",
     )
 
     class Config:
@@ -97,6 +101,10 @@ class ContentModel(BaseModel):
                 "pdf_url": "https://my-oss.com/1706.03762.pdf",
                 "source_page_url": "https://arxiv.org/abs/1706.03762",
                 "parsed_fulltext": {"note": "Large JSON object from GROBID"},
+                "sources_tried": [
+                    "user_pdf_url: https://example.com/paper.pdf",
+                    "arxiv: https://arxiv.org/pdf/1706.03762.pdf",
+                ],
             },
         }
 
@@ -163,8 +171,7 @@ class LiteratureModel(BaseModel):
     identifiers: IdentifiersModel = Field(..., description="Authoritative identifiers")
     metadata: MetadataModel = Field(..., description="Literature metadata")
     content: ContentModel = Field(
-        default_factory=lambda: ContentModel(),
-        description="Content and parsing data",
+        default_factory=lambda: ContentModel(), description="Content and parsing data"
     )
     references: List[ReferenceModel] = Field(
         default_factory=list,
@@ -177,6 +184,10 @@ class LiteratureModel(BaseModel):
     updated_at: datetime = Field(
         default_factory=lambda: datetime.now(),
         description="Last update timestamp",
+    )
+    raw_data: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Raw data from various sources, for debugging.",
     )
 
     class Config:
@@ -332,119 +343,34 @@ class LiteratureSummaryDTO(BaseModel):
     updated_at: datetime = Field(..., description="Last update timestamp")
 
     # 便利字段 - 从metadata中提取的信息，便于前端使用
-    title: Optional[str] = Field(None, description="Literature title (from metadata)")
-    authors: List[str] = Field(
-        default_factory=list,
-        description="Author names (from metadata)",
-    )
-    year: Optional[int] = Field(None, description="Publication year (from metadata)")
-    journal: Optional[str] = Field(None, description="Journal name (from metadata)")
-    doi: Optional[str] = Field(None, description="DOI (from identifiers)")
+    title: Optional[str] = None
+    authors: List[str] = Field(default_factory=list)
+    year: Optional[int] = None
+    journal: Optional[str] = None
+    doi: Optional[str] = None
 
     def model_post_init(self, __context: Any) -> None:
-        """Pydantic v2 post-init hook to populate convenience fields"""
-        self._populate_convenience_fields()
-
-    def _populate_convenience_fields(self) -> None:
-        """从metadata和identifiers中提取信息到便利字段"""
-        # 从identifiers提取DOI
-        if self.identifiers:
-            if hasattr(self.identifiers, "model_dump"):
-                identifiers_dict = self.identifiers.model_dump()
-            else:
-                identifiers_dict = self.identifiers
-
-            if isinstance(identifiers_dict, dict) and identifiers_dict.get("doi"):
-                self.doi = identifiers_dict["doi"]
-
-        # 从metadata提取信息
+        """
+        Populate convenience fields after the model is initialized.
+        This is a Pydantic V2 feature that replaces @root_validator.
+        """
         if self.metadata:
-            if hasattr(self.metadata, "model_dump"):
-                metadata_dict = self.metadata.model_dump()
-            else:
-                metadata_dict = self.metadata
+            self.title = self.metadata.title
+            self.authors = [author.name for author in self.metadata.authors]
+            self.year = self.metadata.year
+            self.journal = self.metadata.journal
+        if self.identifiers:
+            self.doi = self.identifiers.doi
 
-            # 尝试不同来源的元数据
-            sources = ["crossref", "semantic_scholar", "grobid"]
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert the model to a dictionary."""
+        # This is a simplified conversion, you might want to customize it
+        return self.model_dump(by_alias=True)
 
-            for source in sources:
-                if isinstance(metadata_dict, dict):
-                    source_data = metadata_dict.get(source, {})
-                if source_data and isinstance(source_data, dict):
-                    # 提取标题
-                    if not self.title and source_data.get("title"):
-                        self.title = source_data["title"]
-
-                    # 提取年份
-                    if not self.year:
-                        year_val = (
-                            source_data.get("year")
-                            or source_data.get("published-online", {}).get(
-                                "date-parts",
-                                [[None]],
-                            )[0][0]
-                        )
-                        if year_val:
-                            try:
-                                self.year = int(year_val)
-                            except (ValueError, TypeError):
-                                pass
-
-                    # 提取期刊
-                    if not self.journal:
-                        self.journal = (
-                            source_data.get("journal")
-                            or source_data.get("venue")
-                            or source_data.get("container-title", [None])[0]
-                            if isinstance(source_data.get("container-title"), list)
-                            else source_data.get("container-title")
-                        )
-
-                    # 提取作者
-                    if not self.authors:
-                        authors_data = source_data.get(
-                            "authors",
-                            [],
-                        ) or source_data.get("author", [])
-                        if authors_data:
-                            author_names = []
-                            for author in authors_data:
-                                if isinstance(author, dict):
-                                    # 不同格式的作者数据
-                                    name = (
-                                        author.get("name")
-                                        or author.get("full_name")
-                                        or f"{author.get('given', '')} {author.get('family', '')}".strip()
-                                        or author.get("given")
-                                        or author.get("family")
-                                    )
-                                    if name:
-                                        author_names.append(name)
-                                elif isinstance(author, str):
-                                    author_names.append(author)
-
-                            if author_names:
-                                self.authors = author_names
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "id": "lit_abc123",
-                "identifiers": {"doi": "10.48550/arXiv.1706.03762"},
-                "metadata": {
-                    "title": "Attention Is All You Need",
-                    "authors": [{"name": "Ashish Vaswani"}],
-                    "year": 2017,
-                },
-                "content": {
-                    "pdf_url": "https://arxiv.org/pdf/1706.03762.pdf",
-                    "source_page_url": "https://arxiv.org/abs/1706.03762",
-                },
-                "references": [],
-                "created_at": "2024-01-15T10:30:00Z",
-                "updated_at": "2024-01-15T10:30:00Z",
-            },
-        }
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "LiteratureSummaryDTO":
+        """Create a model from a dictionary."""
+        return cls(**data)
 
 
 class LiteratureFulltextDTO(BaseModel):
@@ -460,25 +386,13 @@ class LiteratureFulltextDTO(BaseModel):
         None,
         description="Complete GROBID parsed content",
     )
-    source: Optional[str] = Field(None, description="Source of the fulltext parsing")
-    parsed_at: Optional[datetime] = Field(
-        None,
-        description="When the fulltext was parsed",
-    )
 
     class Config:
         json_schema_extra = {
             "example": {
-                "literature_id": "lit_abc123",
-                "parsed_fulltext": {
-                    "title": "Attention Is All You Need",
-                    "sections": [...],
-                    "figures": [...],
-                    "tables": [...],
-                },
-                "source": "GROBID v0.8.0",
-                "parsed_at": "2024-01-15T10:35:00Z",
-            },
+                "literature_id": "507f1f77bcf86cd799439011",
+                "parsed_fulltext": {"note": "Large JSON object from GROBID"},
+            }
         }
 
 
@@ -488,34 +402,34 @@ class LiteratureFulltextDTO(BaseModel):
 
 
 def literature_to_summary_dto(literature: LiteratureModel) -> LiteratureSummaryDTO:
-    """Convert a LiteratureModel to LiteratureSummaryDTO (excluding fulltext)."""
-    # Create content dict without parsed_fulltext
-    content_dict = {
-        "pdf_url": literature.content.pdf_url,
-        "source_page_url": literature.content.source_page_url,
-    }
-
-    return LiteratureSummaryDTO(
-        id=str(literature.id),
-        identifiers=literature.identifiers,
-        metadata=literature.metadata,
-        content=content_dict,
-        references=literature.references,
-        task_info=literature.task_info,
-        created_at=literature.created_at,
-        updated_at=literature.updated_at,
-        title=literature.title,
-        year=literature.year,
-        journal=literature.journal,
-        doi=literature.doi,
+    """Convert a LiteratureModel to a LiteratureSummaryDTO."""
+    # The conversion is now primarily handled by the DTO's `model_post_init`.
+    # We just need to pass the required fields.
+    summary_data = literature.model_dump(
+        include={
+            "id",
+            "identifiers",
+            "metadata",
+            "content",
+            "references",
+            "task_info",
+            "created_at",
+            "updated_at",
+        }
     )
+    # Pydantic v2 needs the 'id' as a string.
+    summary_data["id"] = str(summary_data["id"])
+
+    # The 'content' field in the DTO should not contain the large 'parsed_fulltext'.
+    if "parsed_fulltext" in summary_data.get("content", {}):
+        del summary_data["content"]["parsed_fulltext"]
+
+    return LiteratureSummaryDTO(**summary_data)
 
 
 def literature_to_fulltext_dto(literature: LiteratureModel) -> LiteratureFulltextDTO:
-    """Convert a LiteratureModel to LiteratureFulltextDTO (only fulltext content)."""
+    """Convert a LiteratureModel to a LiteratureFulltextDTO."""
     return LiteratureFulltextDTO(
         literature_id=str(literature.id),
         parsed_fulltext=literature.content.parsed_fulltext,
-        source="GROBID" if literature.content.parsed_fulltext else None,
-        parsed_at=literature.updated_at if literature.content.parsed_fulltext else None,
     )

@@ -3,8 +3,9 @@
 检查文献详情
 """
 
-import requests
 import json
+
+import requests
 
 
 def check_literature(lit_id):
@@ -14,7 +15,8 @@ def check_literature(lit_id):
 
     try:
         response = requests.get(
-            f"http://localhost:8000/api/literature/{lit_id}", timeout=10
+            f"http://localhost:8000/api/literature/{lit_id}",
+            timeout=10,
         )
 
         if response.status_code == 200:
@@ -46,7 +48,7 @@ def check_literature(lit_id):
                 ]
                 print(
                     f"👥 作者列表: {', '.join(author_names)}"
-                    + (" ..." if len(authors) > 3 else "")
+                    + (" ..." if len(authors) > 3 else ""),
                 )
 
             # 参考文献

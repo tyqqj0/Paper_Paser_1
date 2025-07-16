@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 from requests.exceptions import RequestException, Timeout
 
-from ..models.literature import ContentModel
+from ..models.literature import ContentModel, IdentifiersModel
 from ..services.grobid import GrobidClient
 from ..settings import Settings
 
@@ -36,7 +36,7 @@ class ContentFetcher:
 
     def fetch_content_waterfall(
         self,
-        identifiers,  # IdentifiersModel object
+        identifiers: IdentifiersModel,
         source_data: Dict[str, Any],
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Tuple[ContentModel, Optional[bytes], Dict[str, Any]]:
@@ -55,7 +55,11 @@ class ContentFetcher:
 
         content_model = ContentModel()
         pdf_content = None
-        raw_data = {"sources_tried": [], "download_status": "pending"}
+        sources_tried: List[str] = []
+        raw_data: Dict[str, Any] = {
+            "sources_tried": sources_tried,
+            "download_status": "pending",
+        }
 
         # Step 1: Try user-provided PDF URL
         user_pdf_url = source_data.get("pdf_url")
@@ -63,7 +67,7 @@ class ContentFetcher:
             logger.info(
                 f"Step 1: Attempting download from user-provided PDF URL: {user_pdf_url}",
             )
-            raw_data["sources_tried"].append(f"user_pdf_url: {user_pdf_url}")
+            sources_tried.append(f"user_pdf_url: {user_pdf_url}")
 
             pdf_content = self._download_pdf(user_pdf_url)
             if pdf_content:
@@ -74,6 +78,7 @@ class ContentFetcher:
 
                 # Parse with GROBID if we have PDF content
                 self._parse_with_grobid(content_model, pdf_content, raw_data)
+                content_model.sources_tried = sources_tried
                 return content_model, pdf_content, raw_data
             else:
                 logger.warning("❌ Failed to download from user-provided PDF URL")
@@ -85,7 +90,7 @@ class ContentFetcher:
             url = url_info["url"]
             source_type = url_info["type"]
             logger.info(f"Step 2: Attempting auto-download from {source_type}: {url}")
-            raw_data["sources_tried"].append(f"{source_type}: {url}")
+            sources_tried.append(f"{source_type}: {url}")
 
             pdf_content = self._download_pdf(url)
             if pdf_content:
@@ -100,6 +105,7 @@ class ContentFetcher:
 
                 # Parse with GROBID if we have PDF content
                 self._parse_with_grobid(content_model, pdf_content, raw_data)
+                content_model.sources_tried = sources_tried
                 return content_model, pdf_content, raw_data
             else:
                 logger.warning(f"❌ Failed to download from {source_type}: {url}")
@@ -114,12 +120,13 @@ class ContentFetcher:
             else None
         )
         raw_data["download_status"] = "pdf_unavailable"
+        content_model.sources_tried = sources_tried
 
         return content_model, None, raw_data
 
     def _infer_pdf_urls(
         self,
-        identifiers,
+        identifiers: IdentifiersModel,
         source_data: Dict[str, Any],
         metadata: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, str]]:
@@ -250,7 +257,7 @@ class ContentFetcher:
             logger.error(f"Error parsing PDF with GROBID: {e}")
             raw_data["grobid_parsing"] = f"error: {e}"
 
-    def fetch_pdf_from_arxiv_id(self, arxiv_id: str) -> Optional[bytes]:
+    def fetch_pdf_from_arxiv_id(self, arxiv_id: str) -> Tuple[Optional[str], Optional[bytes]]:
         """
         Fetch a PDF directly from an ArXiv ID.
 
@@ -258,11 +265,14 @@ class ContentFetcher:
             arxiv_id: The ArXiv identifier.
 
         Returns:
-            PDF content as bytes or None if failed.
+            A tuple of (pdf_url, pdf_content_bytes) or (None, None) if failed.
         """
         pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
         logger.info(f"Attempting to download PDF from ArXiv URL: {pdf_url}")
-        return self._download_pdf(pdf_url)
+        pdf_content = self._download_pdf(pdf_url)
+        if pdf_content:
+            return pdf_url, pdf_content
+        return None, None
 
     def _extract_fulltext_from_grobid(self, grobid_data: Dict[str, Any]) -> str:
         """

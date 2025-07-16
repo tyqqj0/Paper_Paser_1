@@ -3,11 +3,13 @@
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import JSONResponse
 from loguru import logger
+from typing import Any, Dict
 
 from literature_parser_backend.db.dao import LiteratureDAO
 from literature_parser_backend.models.literature import (
     LiteratureCreateDTO,
     LiteratureFulltextDTO,
+    LiteratureModel,
     LiteratureSummaryDTO,
 )
 from literature_parser_backend.worker.tasks import process_literature_task
@@ -15,9 +17,9 @@ from literature_parser_backend.worker.tasks import process_literature_task
 router = APIRouter(prefix="/literature", tags=["文献处理"])
 
 
-def _extract_convenience_fields(literature) -> dict:
+def _extract_convenience_fields(literature: LiteratureModel) -> Dict[str, Any]:
     """从文献对象中提取便利字段，智能处理不同数据源格式"""
-    convenience_data = {
+    convenience_data: Dict[str, Any] = {
         "title": None,
         "authors": [],
         "year": None,
@@ -32,19 +34,17 @@ def _extract_convenience_fields(literature) -> dict:
     # 从metadata提取信息
     if literature.metadata:
         metadata_dict = literature.metadata.model_dump()
-        print(f"DEBUG: Metadata dict keys: {list(metadata_dict.keys())}")
-        print(f"DEBUG: Metadata title: {metadata_dict.get('title')}")
 
         # 方法1：尝试直接从平面结构提取（新的统一格式）
         if metadata_dict.get("title"):
             convenience_data["title"] = metadata_dict["title"]
-        
+
         if metadata_dict.get("year"):
             convenience_data["year"] = metadata_dict["year"]
-            
+
         if metadata_dict.get("journal"):
             convenience_data["journal"] = metadata_dict["journal"]
-            
+
         # 处理作者数据
         if metadata_dict.get("authors"):
             authors_data = metadata_dict["authors"]
@@ -64,12 +64,19 @@ def _extract_convenience_fields(literature) -> dict:
                             author_names.append(name)
                     elif isinstance(author, str):
                         author_names.append(author)
-                
+
                 if author_names:
                     convenience_data["authors"] = author_names
 
         # 方法2：如果平面结构没有数据，尝试嵌套结构（兼容旧格式）
-        if not any([convenience_data["title"], convenience_data["authors"], convenience_data["year"], convenience_data["journal"]]):
+        if not any(
+            [
+                convenience_data["title"],
+                convenience_data["authors"],
+                convenience_data["year"],
+                convenience_data["journal"],
+            ],
+        ):
             # 尝试不同来源的元数据
             sources = ["crossref", "semantic_scholar", "grobid"]
 
@@ -107,7 +114,10 @@ def _extract_convenience_fields(literature) -> dict:
 
                     # 提取作者
                     if not convenience_data["authors"]:
-                        authors_data = source_data.get("authors", []) or source_data.get(
+                        authors_data = source_data.get(
+                            "authors",
+                            [],
+                        ) or source_data.get(
                             "author",
                             [],
                         )
@@ -135,7 +145,7 @@ def _extract_convenience_fields(literature) -> dict:
 
 
 @router.post("", summary="提交文献处理请求")
-async def create_literature(literature_data: LiteratureCreateDTO):
+async def create_literature(literature_data: LiteratureCreateDTO) -> JSONResponse:
     """
     提交文献处理请求
 
@@ -232,7 +242,6 @@ async def get_literature_summary(literature_id: str) -> LiteratureSummaryDTO:
 
         # 手动提取便利字段数据
         convenience_data = _extract_convenience_fields(literature)
-        logger.info(f"Extracted convenience data: {convenience_data}")
 
         # 转换为摘要DTO
         summary = LiteratureSummaryDTO(
@@ -268,13 +277,13 @@ async def get_literature_summary(literature_id: str) -> LiteratureSummaryDTO:
 @router.get("/{literature_id}/fulltext", summary="获取文献完整内容")
 async def get_literature_fulltext(literature_id: str) -> LiteratureFulltextDTO:
     """
-    获取文献的完整解析内容
+    获取文献的完整解析内容（例如GROBID的输出）
 
     Args:
         literature_id: 文献的MongoDB ObjectId
 
     Returns:
-        LiteratureFulltextDTO: 文献完整内容
+        LiteratureFulltextDTO: 包含完整解析内容
     """
     try:
         dao = LiteratureDAO()
@@ -286,25 +295,18 @@ async def get_literature_fulltext(literature_id: str) -> LiteratureFulltextDTO:
                 detail="文献不存在",
             )
 
-        # 转换为完整内容DTO
-        fulltext = LiteratureFulltextDTO(
-            id=str(literature.id),
-            identifiers=literature.identifiers,
-            metadata=literature.metadata,
-            content=literature.content,
-            references=literature.references,
-            task_info=literature.task_info,
-            created_at=literature.created_at,
-            updated_at=literature.updated_at,
+        # 确保content字段存在且为ContentModel实例
+        parsed_fulltext = (
+            literature.content.parsed_fulltext if literature.content else None
         )
 
-        logger.info(f"获取文献完整内容成功: {literature_id}")
-        return fulltext
+        return LiteratureFulltextDTO(
+            literature_id=str(literature.id),
+            parsed_fulltext=parsed_fulltext,
+        )
 
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"获取文献完整内容错误: {e!s}")
+        logger.error(f"获取文献全文内容错误: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"内部服务错误: {e!s}",

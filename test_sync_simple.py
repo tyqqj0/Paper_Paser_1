@@ -35,7 +35,7 @@ def test_identifier_extraction():
     for case in test_cases:
         try:
             identifiers, primary_type = extract_authoritative_identifiers(
-                case["source"]
+                case["source"],
             )
 
             if primary_type == case["expected_primary"]:
@@ -43,7 +43,7 @@ def test_identifier_extraction():
                 success_count += 1
             else:
                 print(
-                    f"❌ {case['name']}: 期望 {case['expected_primary']}, 得到 {primary_type}"
+                    f"❌ {case['name']}: 期望 {case['expected_primary']}, 得到 {primary_type}",
                 )
 
         except Exception as e:
@@ -58,19 +58,8 @@ def test_basic_imports():
     print("🔍 测试模块导入...")
 
     try:
-        from literature_parser_backend.worker.content_fetcher import ContentFetcher
-        from literature_parser_backend.worker.metadata_fetcher import MetadataFetcher
-        from literature_parser_backend.worker.references_fetcher import (
-            ReferencesFetcher,
-        )
 
         print("✅ 所有Fetcher模块导入成功")
-
-        from literature_parser_backend.services.crossref import CrossRefClient
-        from literature_parser_backend.services.semantic_scholar import (
-            SemanticScholarClient,
-        )
-        from literature_parser_backend.services.grobid import GrobidClient
 
         print("✅ 所有服务客户端导入成功")
 
@@ -105,7 +94,7 @@ if __name__ == "__main__":
         else:
             print(f"❌ {test_name} 失败")
 
-    print(f"\n" + "=" * 50)
+    print("\n" + "=" * 50)
     print(f"总结: {passed}/{total} 测试通过")
 
     if passed == total:

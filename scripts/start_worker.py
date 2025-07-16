@@ -10,8 +10,8 @@ Make sure Redis is running before starting the worker.
 """
 
 import os
-import sys
 import subprocess
+import sys
 from pathlib import Path
 
 
