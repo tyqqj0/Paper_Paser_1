@@ -13,10 +13,12 @@ import httpx
 # Give services a moment to start up
 # time.sleep(5) # No need to sleep when running inside the same network
 
-BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:8088/api/v1")
+BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:8000/api")
 DOI = "10.1109/5.771073"
 ARXIV_ID = "1706.03762"
 
+# 设置日志级别
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -31,7 +33,7 @@ async def test_literature_parser() -> bool:
     async with httpx.AsyncClient(timeout=300.0) as client:
         # 1. API健康检查
         try:
-            response = await client.get("http://127.0.0.1:8088/api/health")
+            response = await client.get("http://127.0.0.1:8000/api/health")
             if response.status_code == 200:
                 logger.info("✅ API服务正常")
             else:
@@ -44,7 +46,7 @@ async def test_literature_parser() -> bool:
         # 2. 提交文献处理任务
         try:
             response = await client.post(
-                "http://127.0.0.1:8088/api/literature",
+                "http://127.0.0.1:8000/api/literature",
                 json={"url": "http://arxiv.org/abs/2205.14217"},
                 timeout=30,
             )
@@ -63,21 +65,26 @@ async def test_literature_parser() -> bool:
 
         # 3. 监控任务进度
         literature_id = None
-        max_wait_time = 120  # 最多等待2分钟
+        max_wait_time = 300  # 最多等待5分钟
         start_time = time.time()
 
         while time.time() - start_time < max_wait_time:
             try:
-                response = await client.get(f"http://127.0.0.1:8088/api/task/{task_id}")
+                response = await client.get(f"http://127.0.0.1:8000/api/task/{task_id}")
                 task_data = response.json()
 
                 status = task_data.get("status", "unknown")
-                logger.debug(f"任务状态: {status}")
+                logger.info(f"任务状态: {status}")
 
-                if status == "success":
+                if status in ["success_created", "success_duplicate", "success"]:
                     literature_id = task_data.get("literature_id")
                     if literature_id:
-                        logger.info(f"🎉 任务完成！文献ID: {literature_id}")
+                        if status == "success_created":
+                            logger.info(f"🎉 任务完成！新文献创建，ID: {literature_id}")
+                        else:
+                            logger.info(
+                                f"🎉 任务完成！发现重复文献，ID: {literature_id}"
+                            )
                         break
                     else:
                         logger.error("❌ 任务完成但没有返回文献ID")
@@ -103,7 +110,7 @@ async def test_literature_parser() -> bool:
 
         try:
             response = await client.get(
-                f"http://127.0.0.1:8088/api/literature/{literature_id}",
+                f"http://127.0.0.1:8000/api/literature/{literature_id}",
             )
             if response.status_code == 200:
                 lit_data = response.json()

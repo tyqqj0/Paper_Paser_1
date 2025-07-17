@@ -11,20 +11,28 @@ from typing import Any, ClassVar, Dict, Optional
 
 from pydantic import BaseModel, Field
 
-from .common import PyObjectId
-
 # ===============================
 # Core Data Models for Task Status
 # ===============================
 
+
 class ComponentStatus(BaseModel):
     """Represents the processing status of each component of a literature."""
+
     metadata: str = Field(default="pending", description="Status of metadata fetching")
-    content: str = Field(default="pending", description="Status of content fetching and parsing")
-    references: str = Field(default="pending", description="Status of references fetching")
+    content: str = Field(
+        default="pending",
+        description="Status of content fetching and parsing",
+    )
+    references: str = Field(
+        default="pending",
+        description="Status of references fetching",
+    )
+
 
 class TaskStatus(str, Enum):
     """Enum for the overall status of a task."""
+
     """Enumeration of possible task statuses."""
 
     PENDING = "pending"
@@ -78,8 +86,11 @@ class TaskStatusDTO(BaseModel):
 
     task_id: str = Field(..., description="The Celery task ID")
     status: str = Field(..., description="Overall status of the task")
-    result: Optional[Any] = Field(None, description="The result of the task, if completed.")
-    
+    result: Optional[Any] = Field(
+        None,
+        description="The result of the task, if completed.",
+    )
+
     # Granular status and progress
     component_status: Optional[ComponentStatus] = Field(
         default_factory=ComponentStatus,
@@ -111,7 +122,7 @@ class TaskStatusDTO(BaseModel):
     # Timestamps are optional as they might not be available for PENDING tasks
     created_at: Optional[datetime] = Field(None, description="Task creation timestamp")
     updated_at: Optional[datetime] = Field(None, description="Last update timestamp")
-    
+
     estimated_completion: Optional[datetime] = Field(
         None,
         description="Estimated completion time",

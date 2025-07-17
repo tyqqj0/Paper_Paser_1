@@ -2,13 +2,13 @@
 
 from .dao import LiteratureDAO
 from .mongodb import (
-    connect_to_mongodb,
-    get_database,
-    literature_collection,
-    create_task_connection,
     close_task_connection,
-    get_task_collection,
+    connect_to_mongodb,
+    create_task_connection,
     create_task_indexes,
+    get_database,
+    get_task_collection,
+    literature_collection,
 )
 
 __all__ = [

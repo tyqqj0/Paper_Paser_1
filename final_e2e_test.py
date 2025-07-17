@@ -14,14 +14,14 @@ def run_test(url, source_type="arxiv"):
     # 提交任务
     payload = {"source": {"url": url, "source_type": source_type}}
     response = requests.post(
-        "http://localhost:8088/api/literature", json=payload, timeout=10
+        "http://localhost:8000/api/literature", json=payload, timeout=10
     )
 
     task_or_literature_id = None
     if response.status_code == 202:
-        task_or_literature_id = response.json().get("taskId")
+        task_or_literature_id = response.json().get("task_id")
     elif response.status_code == 200:
-        task_or_literature_id = response.json().get("literatureId")
+        task_or_literature_id = response.json().get("literature_id")
 
     if not task_or_literature_id:
         print("❌ 任务提交或查询失败")
@@ -35,7 +35,7 @@ def run_test(url, source_type="arxiv"):
         print("⏳ 等待任务完成...")
         for _ in range(30):
             status_response = requests.get(
-                f"http://localhost:8088/api/task/{task_or_literature_id}", timeout=5
+                f"http://localhost:8000/api/task/{task_or_literature_id}", timeout=5
             )
             status = status_response.json()
             if status.get("status") == "success":
@@ -51,10 +51,10 @@ def run_test(url, source_type="arxiv"):
 
     # 获取并分析结果
     details = requests.get(
-        f"http://localhost:8088/api/literature/{literature_id}", timeout=10
+        f"http://localhost:8000/api/literature/{literature_id}", timeout=10
     ).json()
     fulltext = requests.get(
-        f"http://localhost:8088/api/literature/{literature_id}/fulltext", timeout=10
+        f"http://localhost:8000/api/literature/{literature_id}/fulltext", timeout=10
     ).json()
 
     references = details.get("references", [])

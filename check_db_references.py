@@ -4,12 +4,13 @@
 import subprocess
 import json
 
+
 def check_database_references():
     """检查数据库中的references数据"""
     print("=== 检查数据库中的References数据 ===")
-    
+
     # MongoDB查询脚本
-    mongo_script = '''
+    mongo_script = """
     use literature_parser;
     print("=== 数据库统计 ===");
     var total = db.literatures.countDocuments({});
@@ -42,51 +43,64 @@ def check_database_references():
         }
         print("---");
       });
-    '''
-    
+    """
+
     try:
         # 使用docker exec执行MongoDB查询
-        result = subprocess.run([
-            'docker', 'exec', 'paper_paser_1-db-1', 
-            'mongosh', '--eval', mongo_script
-        ], capture_output=True, text=True, timeout=30)
-        
+        result = subprocess.run(
+            ["docker", "exec", "paper_paser_1-db-1", "mongosh", "--eval", mongo_script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
         if result.returncode == 0:
             print(result.stdout)
         else:
             print(f"MongoDB查询失败: {result.stderr}")
-            
+
     except subprocess.TimeoutExpired:
         print("MongoDB查询超时")
     except Exception as e:
         print(f"查询出错: {e}")
 
+
 def check_specific_literature():
     """检查特定文献的详细信息"""
     print("\n=== 检查特定文献的详细信息 ===")
-    
+
     # 获取最新的一个文献ID
-    mongo_script = '''
+    mongo_script = """
     use literature_parser;
     var latest = db.literatures.findOne({}, {_id: 1}, {sort: {created_at: -1}});
     if (latest) {
         print(latest._id);
     }
-    '''
-    
+    """
+
     try:
-        result = subprocess.run([
-            'docker', 'exec', 'paper_paser_1-db-1', 
-            'mongosh', '--quiet', '--eval', mongo_script
-        ], capture_output=True, text=True, timeout=30)
-        
+        result = subprocess.run(
+            [
+                "docker",
+                "exec",
+                "paper_paser_1-db-1",
+                "mongosh",
+                "--quiet",
+                "--eval",
+                mongo_script,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
         if result.returncode == 0:
             literature_id = result.stdout.strip()
             if literature_id:
                 print(f"最新文献ID: {literature_id}")
-                
+
                 # 获取该文献的详细信息
-                detailed_script = f'''
+                detailed_script = f"""
                 use literature_parser;
                 var doc = db.literatures.findOne({{_id: ObjectId("{literature_id}")}});
                 if (doc) {{
@@ -114,23 +128,34 @@ def check_specific_literature():
                         }}
                     }}
                 }}
-                '''
-                
-                detail_result = subprocess.run([
-                    'docker', 'exec', 'paper_paser_1-db-1', 
-                    'mongosh', '--quiet', '--eval', detailed_script
-                ], capture_output=True, text=True, timeout=30)
-                
+                """
+
+                detail_result = subprocess.run(
+                    [
+                        "docker",
+                        "exec",
+                        "paper_paser_1-db-1",
+                        "mongosh",
+                        "--quiet",
+                        "--eval",
+                        detailed_script,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+
                 if detail_result.returncode == 0:
                     print(detail_result.stdout)
                 else:
                     print(f"详细查询失败: {detail_result.stderr}")
             else:
                 print("没有找到文献记录")
-                
+
     except Exception as e:
         print(f"查询出错: {e}")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     check_database_references()
-    check_specific_literature() 
+    check_specific_literature()

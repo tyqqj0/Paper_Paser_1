@@ -199,7 +199,10 @@ class TaskInfoModel(BaseModel):
     )
     created_at: Optional[datetime] = Field(None, description="Task creation time")
     completed_at: Optional[datetime] = Field(None, description="Task completion time")
-    error_message: Optional[str] = Field(None, description="Error message if task failed")
+    error_message: Optional[str] = Field(
+        None,
+        description="Error message if task failed",
+    )
 
 
 # ===============================
