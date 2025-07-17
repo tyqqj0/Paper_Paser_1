@@ -10,9 +10,18 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from bson import ObjectId
+from motor.motor_asyncio import AsyncIOMotorCollection, AsyncIOMotorDatabase
 
-from ..models import LiteratureModel, LiteratureSummaryDTO
-from .mongodb import literature_collection
+from ..models.literature import (
+    IdentifiersModel,
+    LiteratureModel,
+    LiteratureSummaryDTO,
+    MetadataModel,
+    TaskInfoModel,
+    literature_to_summary_dto,
+)
+from ..models.task import ComponentStatus
+from .mongodb import literature_collection, get_task_collection
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +29,50 @@ logger = logging.getLogger(__name__)
 class LiteratureDAO:
     """Data Access Object for literature collection."""
 
-    def __init__(self) -> None:
-        """Initialize DAO with database collection."""
-        self.collection = literature_collection()
+    def __init__(
+        self,
+        database: Optional[AsyncIOMotorDatabase[Dict[str, Any]]] = None,
+        collection: Optional[AsyncIOMotorCollection[Dict[str, Any]]] = None,
+    ) -> None:
+        """
+        Initialize DAO with database collection.
+        
+        :param database: Task-level database instance (optional)
+        :param collection: Direct collection instance (optional)
+        """
+        if collection is not None:
+            # Use directly provided collection
+            self.collection = collection
+        elif database is not None:
+            # Use task-level database connection
+            self.collection = get_task_collection(database)
+        else:
+            # Fallback to global connection (backward compatibility)
+            self.collection = literature_collection()
+
+    @classmethod
+    def create_from_global_connection(cls) -> "LiteratureDAO":
+        """
+        Create DAO instance using global database connection.
+        
+        This method provides backward compatibility for existing code.
+        
+        :return: DAO instance using global connection
+        """
+        return cls()
+
+    @classmethod
+    def create_from_task_connection(
+        cls, 
+        database: AsyncIOMotorDatabase[Dict[str, Any]],
+    ) -> "LiteratureDAO":
+        """
+        Create DAO instance using task-level database connection.
+        
+        :param database: Task-level database instance
+        :return: DAO instance using task connection
+        """
+        return cls(database=database)
 
     async def create_literature(self, literature: LiteratureModel) -> str:
         """
@@ -115,20 +165,18 @@ class LiteratureDAO:
 
     async def find_by_fingerprint(self, fingerprint: str) -> Optional[LiteratureModel]:
         """
-        Find literature by fingerprint.
+        Find literature by content fingerprint.
 
-        :param fingerprint: Fingerprint to search for
-        :return: Literature model or None if not found
+        :param fingerprint: The content-based fingerprint to search for.
+        :return: Literature model or None if not found.
         """
         try:
             doc = await self.collection.find_one(
-                {"identifiers.fingerprint": fingerprint},
+                {"identifiers.fingerprint": fingerprint}
             )
             if not doc:
                 return None
-
             return LiteratureModel(**doc)
-
         except Exception as e:
             logger.error(f"Failed to find literature by fingerprint {fingerprint}: {e}")
             return None
@@ -338,3 +386,42 @@ class LiteratureDAO:
         except Exception as e:
             logger.error(f"Fuzzy title search failed for '{title}': {e}")
             return None
+
+    async def create_placeholder(self, task_id: str, identifiers: IdentifiersModel) -> str:
+        """Create a placeholder literature document to reserve an ID and track status."""
+        placeholder = LiteratureModel(
+            identifiers=identifiers,
+            metadata=MetadataModel(title="Processing..."),
+            task_info=TaskInfoModel(task_id=task_id, status="processing"),
+        )
+        doc = placeholder.model_dump(by_alias=True, exclude={"id"})
+        result = await self.collection.insert_one(doc)
+        return str(result.inserted_id)
+
+    async def update_component_status(
+        self, literature_id: str, component: str, status: str, message: Optional[str] = None
+    ) -> None:
+        """Update the status of a specific component for a literature document."""
+        update_fields = {
+            f"task_info.component_status.{component}": status,
+            "updated_at": datetime.now(),
+        }
+        if message:
+            update_fields["task_info.error_message"] = message
+
+        await self.collection.update_one(
+            {"_id": ObjectId(literature_id)}, {"$set": update_fields}
+        )
+
+    async def finalize_literature(
+        self, literature_id: str, final_model: LiteratureModel
+    ) -> None:
+        """Update the placeholder with the final, fully processed literature data."""
+        final_doc = final_model.model_dump(by_alias=True, exclude={"id"})
+        final_doc["updated_at"] = datetime.now()
+        final_doc["task_info.status"] = "success"
+        final_doc["task_info.completed_at"] = datetime.now()
+
+        await self.collection.replace_one(
+            {"_id": ObjectId(literature_id)}, final_doc
+        )

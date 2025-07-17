@@ -11,8 +11,20 @@ from typing import Any, ClassVar, Dict, Optional
 
 from pydantic import BaseModel, Field
 
+from .common import PyObjectId
+
+# ===============================
+# Core Data Models for Task Status
+# ===============================
+
+class ComponentStatus(BaseModel):
+    """Represents the processing status of each component of a literature."""
+    metadata: str = Field(default="pending", description="Status of metadata fetching")
+    content: str = Field(default="pending", description="Status of content fetching and parsing")
+    references: str = Field(default="pending", description="Status of references fetching")
 
 class TaskStatus(str, Enum):
+    """Enum for the overall status of a task."""
     """Enumeration of possible task statuses."""
 
     PENDING = "pending"
@@ -62,19 +74,24 @@ class TaskErrorInfo(BaseModel):
 
 
 class TaskStatusDTO(BaseModel):
-    """
-    Task status DTO for API responses.
+    """Data transfer object for task status queries."""
 
-    Used for GET /tasks/{taskId} to provide real-time task progress
-    information to the frontend.
-    """
-
-    task_id: str = Field(..., description="Unique task identifier")
-    status: TaskStatus = Field(..., description="Current task status")
-    stage: Optional[TaskStage] = Field(None, description="Current processing stage")
+    task_id: str = Field(..., description="The Celery task ID")
+    status: str = Field(..., description="Overall status of the task")
+    result: Optional[Any] = Field(None, description="The result of the task, if completed.")
+    
+    # Granular status and progress
+    component_status: Optional[ComponentStatus] = Field(
+        default_factory=ComponentStatus,
+        description="Granular status of each processing component",
+    )
+    details: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Detailed progress information, like current stage",
+    )
     literature_id: Optional[str] = Field(
         None,
-        description="Literature ID (available when status is SUCCESS)",
+        description="Literature ID (available when processing starts or completes)",
     )
     resource_url: Optional[str] = Field(
         None,
@@ -90,8 +107,11 @@ class TaskStatusDTO(BaseModel):
         None,
         description="Error details (available when status is FAILURE)",
     )
-    created_at: datetime = Field(..., description="Task creation timestamp")
-    updated_at: datetime = Field(..., description="Last update timestamp")
+
+    # Timestamps are optional as they might not be available for PENDING tasks
+    created_at: Optional[datetime] = Field(None, description="Task creation timestamp")
+    updated_at: Optional[datetime] = Field(None, description="Last update timestamp")
+    
     estimated_completion: Optional[datetime] = Field(
         None,
         description="Estimated completion time",

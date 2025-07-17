@@ -31,22 +31,15 @@ class ReferencesFetcher:
         pdf_content: Optional[bytes] = None,
     ) -> Tuple[List[ReferenceModel], Dict[str, Any]]:
         """
-        Fetch references using waterfall approach: Semantic Scholar -> GROBID fallback.
-
-        Args:
-            identifiers: Dictionary with doi, arxiv_id, etc.
-            pdf_content: Optional PDF content for GROBID fallback
-
-        Returns:
-            Tuple of (List[ReferenceModel], raw_data_dict)
+        Fetch references using waterfall: Semantic Scholar -> GROBID fallback.
         """
-        logger.info(f"Starting references fetch with identifiers: {identifiers}")
+        logger.info(f"Starting references fetch for identifiers: {identifiers}")
 
         references: List[ReferenceModel] = []
         raw_data: Dict[str, Any] = {}
 
-        # Strategy 1: Use Semantic Scholar API if an identifier is available
-        identifier = identifiers.get("arxiv_id") or identifiers.get("doi")
+        # 1. Try Semantic Scholar API
+        identifier = identifiers.get("doi") or identifiers.get("arxiv_id")
         if identifier:
             logger.info(
                 "Attempting to fetch references from Semantic Scholar for "
@@ -72,8 +65,9 @@ class ReferencesFetcher:
                     logger.info(
                         f"✅ Successfully fetched {len(references)} references.",
                     )
-                    # If we get results from S2, we can consider it done.
-                    return references, raw_data
+                    # If we get results from S2, we are done.
+                    if references:
+                         return references, raw_data
             except Exception as e:
                 logger.warning(
                     "Semantic Scholar API for references failed: %s. "
@@ -81,28 +75,27 @@ class ReferencesFetcher:
                     e,
                 )
 
-        # Strategy 2: Fallback to GROBID if we have PDF content
-        if pdf_content:
-            logger.info("Attempting to parse references from PDF using GROBID.")
+        # 2. Fallback to GROBID if we have PDF content
+        if not references and pdf_content:
+            logger.info("Falling back to GROBID for reference extraction from PDF.")
             try:
+                # Use the 'processReferences' service for better performance
                 grobid_data = self.grobid_client.process_pdf(
-                    pdf_content,
-                    service="process_references",  # Corrected service name
+                    pdf_content, service="processReferences"
                 )
-                if grobid_data:
+                if grobid_data and isinstance(grobid_data, list):
                     raw_data["grobid"] = grobid_data
-                    for ref_data in grobid_data:
+                    # Placeholder for a proper TEI XML to ReferenceModel conversion
+                    for ref_text in grobid_data:
                         references.append(
-                            ReferenceModel(
-                                raw_text=ref_data.get("raw_text", ""),
-                                parsed=ref_data,
-                                source="grobid",
-                            ),
+                            ReferenceModel(raw_text=ref_text, source="grobid_fallback")
                         )
                     logger.info(
-                        f"✅ Successfully parsed {len(references)} references from PDF.",
+                        f"✅ Successfully parsed {len(references)} reference strings from PDF."
                     )
+                else:
+                    logger.warning(f"GROBID did not return a list of references. Output: {grobid_data}")
             except Exception as e:
-                logger.error(f"GROBID reference parsing failed: {e}")
+                logger.error(f"GROBID reference parsing failed: {e}", exc_info=True)
 
         return references, raw_data

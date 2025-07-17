@@ -42,10 +42,10 @@ class GrobidClient:
         }
         # Configure session
         self.session = requests.Session()
-        if self.settings.proxy_url:
+        if self.settings.http_proxy or self.settings.https_proxy:
             self.session.proxies = {
-                "http": self.settings.proxy_url,
-                "https": self.settings.proxy_url,
+                "http": self.settings.http_proxy,
+                "https": self.settings.https_proxy,
             }
         else:
             self.session.proxies = {"http": "", "https": ""}
