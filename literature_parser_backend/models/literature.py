@@ -12,6 +12,7 @@ from typing import Any, ClassVar, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from .common import PyObjectId
+from .task import ComponentStatus
 
 # ===============================
 # Core Data Models
@@ -191,9 +192,14 @@ class TaskInfoModel(BaseModel):
     """Task information associated with this literature."""
 
     task_id: Optional[str] = Field(None, description="Associated Celery task ID")
-    status: Optional[str] = Field(None, description="Task processing status")
+    status: Optional[str] = Field(None, description="Overall task processing status")
+    component_status: ComponentStatus = Field(
+        default_factory=ComponentStatus,
+        description="Granular status of each processing component",
+    )
     created_at: Optional[datetime] = Field(None, description="Task creation time")
     completed_at: Optional[datetime] = Field(None, description="Task completion time")
+    error_message: Optional[str] = Field(None, description="Error message if task failed")
 
 
 # ===============================

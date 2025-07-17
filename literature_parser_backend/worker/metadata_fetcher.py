@@ -12,6 +12,7 @@ from ..models.literature import AuthorModel, IdentifiersModel, MetadataModel
 from ..services.crossref import CrossRefClient
 from ..services.semantic_scholar import SemanticScholarClient
 from ..settings import Settings
+from ..services.grobid import GrobidClient
 
 logger = logging.getLogger(__name__)
 
@@ -34,29 +35,28 @@ class MetadataFetcher:
 
     def fetch_metadata_waterfall(
         self,
-        identifiers: IdentifiersModel,
-        primary_type: str,
+        identifiers: Dict[str, Any],
         source_data: Dict[str, Any],
+        pre_fetched_metadata: Optional[MetadataModel] = None,
+        pdf_content: Optional[bytes] = None,
     ) -> Tuple[Optional[MetadataModel], Dict[str, Any]]:
         """
         Fetch metadata using a waterfall approach.
-
-        Args:
-            identifiers: Dictionary containing doi, arxiv_id, etc.
-            primary_type: The primary identifier type ('doi', 'arxiv').
-            source_data: Original data from the user request.
-
-        Returns:
-            A tuple of (MetadataModel, raw_data_dict).
+        Priority: Pre-fetched > CrossRef > Semantic Scholar > GROBID > Fallback
         """
-        logger.info(f"Starting metadata fetch with primary type: {primary_type}")
+        logger.info(f"Starting metadata fetch for identifiers: {identifiers}")
+
+        # 1. Use pre-fetched metadata if available
+        if pre_fetched_metadata and pre_fetched_metadata.title != "Unknown Title":
+            logger.info("Using pre-fetched metadata from initial GROBID parse.")
+            return pre_fetched_metadata, {"source": "pre-fetched"}
 
         metadata: Optional[MetadataModel] = None
         raw_data: Dict[str, Any] = {}
         source_priority: List[str] = []
 
-        # Strategy 1: Try CrossRef if we have a DOI
-        if identifiers.get("doi") and primary_type == "doi":
+        # 2. Try CrossRef if DOI is available
+        if identifiers.get("doi"):
             logger.info("Attempting CrossRef lookup...")
             try:
                 crossref_metadata, crossref_raw_data = self._fetch_from_crossref(
@@ -70,7 +70,7 @@ class MetadataFetcher:
             except Exception as e:
                 logger.warning(f"CrossRef lookup failed: {e}")
 
-        # Strategy 2: Try Semantic Scholar if CrossRef failed or we have ArXiv ID
+        # 3. Try Semantic Scholar
         if not metadata and (identifiers.get("arxiv_id") or identifiers.get("doi")):
             logger.info("Attempting Semantic Scholar lookup...")
             try:
@@ -94,18 +94,30 @@ class MetadataFetcher:
             except Exception as e:
                 logger.warning(f"Semantic Scholar lookup failed: {e}")
 
-        # Strategy 3: Fallback to source data if all APIs failed
+        # 4. Fallback to GROBID if we have PDF content
+        if not metadata and pdf_content:
+            logger.info("Attempting metadata extraction from PDF using GROBID.")
+            try:
+                grobid_client = GrobidClient(self.settings)
+                header_data = grobid_client.process_header_only(pdf_content)
+                if header_data:
+                    from ..worker.utils import convert_grobid_to_metadata
+                    metadata = convert_grobid_to_metadata(header_data)
+                    raw_data["grobid"] = header_data
+                    source_priority.append("GROBID")
+                    logger.info("✅ Successfully fetched metadata from GROBID.")
+            except Exception as e:
+                logger.warning(f"GROBID metadata extraction failed: {e}")
+
+        # 5. Fallback to source data if all else fails
         if not metadata:
             logger.info("All API lookups failed, creating metadata from source data...")
             metadata = self._create_fallback_metadata(source_data)
             source_priority.append("Source data fallback")
             raw_data = {"source": "fallback", "original_source": source_data}
 
-        # Update source priority in metadata
-        if hasattr(metadata, "source_priority"):
+        if metadata:
             metadata.source_priority = source_priority
-
-        logger.info(f"Final metadata source priority: {source_priority}")
         return metadata, raw_data
 
     def _fetch_from_crossref(

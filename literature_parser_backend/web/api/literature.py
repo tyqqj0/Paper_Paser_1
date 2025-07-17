@@ -149,81 +149,50 @@ def _extract_convenience_fields(literature: LiteratureModel) -> Dict[str, Any]:
     return convenience_data
 
 
-@router.post("", summary="Submit literature for processing")
+@router.post(
+    "",
+    summary="Submit literature for processing",
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def create_literature(
     literature_data: LiteratureCreateRequestDTO,
 ) -> JSONResponse:
     """
-    Submit a literature processing request.
-
-    Workflow:
-    1. Deduplicate based on DOI or other unique identifiers.
-    2. If found, return 200 with the existing literatureId.
-    3. If not found, start a background task and return 202 with a taskId.
+    Submit a literature for asynchronous processing.
+    This endpoint ONLY creates a task and returns immediately.
+    All deduplication logic is handled by the asynchronous worker.
     """
     try:
-        dao = LiteratureDAO()
-
-        # 智能查重逻辑：DOI > ArXiv ID > 标题匹配
-        existing_literature = None
         effective_values = literature_data.get_effective_values()
 
-        # 1. 优先使用DOI查重（最可靠）
-        if effective_values.get("doi"):
-            logger.info(f"正在通过DOI查重: {effective_values['doi']}")
-            existing_literature = await dao.find_by_doi(effective_values["doi"])
-
-        # 2. 其次使用ArXiv ID查重
-        if not existing_literature and effective_values.get("arxiv_id"):
-            logger.info(f"正在通过ArXiv ID查重: {effective_values['arxiv_id']}")
-            existing_literature = await dao.find_by_arxiv_id(
-                effective_values["arxiv_id"],
+        if not any(key in effective_values for key in ["doi", "arxiv_id", "url", "pdf_url", "title"]):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="At least one identifier must be provided.",
             )
 
-        # 3. 最后使用标题查重（最实用）
-        if not existing_literature and effective_values.get("title"):
-            logger.info(f"正在通过标题查重: {effective_values['title']}")
-            existing_literature = await dao.find_by_title(effective_values["title"])
-
-            # 如果精确匹配失败，尝试模糊匹配
-            if not existing_literature:
-                logger.info("尝试标题模糊匹配...")
-                existing_literature = await dao.find_by_title_fuzzy(
-                    effective_values["title"],
-                    0.85,
-                )
-
-        if existing_literature:
-            logger.info(f"找到现有文献: {existing_literature.id}")
-            return JSONResponse(
-                status_code=status.HTTP_200_OK,
-                content={
-                    "message": "文献已存在",
-                    "literatureId": str(existing_literature.id),
-                    "status": "exists",
-                },
-            )
-
-        # 未找到现有文献，启动后台任务
-        logger.info("未找到现有文献，启动后台处理任务")
+        logger.info(f"Received submission, creating task with data: {effective_values}")
+        
+        # Directly create a task without any synchronous checks.
         task = process_literature_task.delay(effective_values)
+        
+        logger.info(f"Task {task.id} created for processing.")
 
-        logger.info(f"任务已启动，任务ID: {task.id}")
         return JSONResponse(
             status_code=status.HTTP_202_ACCEPTED,
             content={
-                "message": "文献处理任务已启动",
-                "taskId": task.id,
-                "status": "processing",
+                "message": "Literature processing task created.",
+                "task_id": task.id,
+                "status_url": f"/api/task/status/{task.id}",
             },
         )
 
     except Exception as e:
-        logger.error(f"文献提交处理错误: {e!s}")
+        logger.error(f"Error submitting literature: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {e!s}",
-        ) from e
+            detail="Internal Server Error.",
+        )
 
 
 @router.get("/{literature_id}", summary="Get literature summary")

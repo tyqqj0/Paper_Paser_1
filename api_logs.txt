@@ -1,0 +1,189 @@
+api-1  | INFO:     Started server process [1]
+api-1  | INFO:     Waiting for application startup.
+api-1  | 2025-07-16 15:48:03.175 | INFO     | literature_parser_backend.web.lifespan:lifespan_setup:29 - Initializing MongoDB connection...
+api-1  | 'doi_index' not found, skipping.
+api-1  | 'arxiv_id_index' not found, skipping.
+api-1  | 2025-07-16 15:48:03.201 | INFO     | literature_parser_backend.web.lifespan:lifespan_setup:31 - MongoDB connection established successfully
+api-1  | INFO:     Application startup complete.
+api-1  | INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+api-1  | INFO:     172.18.0.1:34264 - "GET /api/health HTTP/1.1" 200 OK
+api-1  | 2025-07-16 15:51:02.665 | INFO     | literature_parser_backend.web.api.literature:create_literature:174 - Received submission, creating task with data: {'pdf_url': 'https://arxiv.org/pdf/1706.03762.pdf'}
+api-1  | 2025-07-16 15:51:03.020 | INFO     | literature_parser_backend.web.api.literature:create_literature:179 - Task 93562dee-fe09-408b-8a13-ced15ea4a02d created for processing.
+api-1  | INFO:     172.18.0.1:46086 - "POST /api/literature HTTP/1.1" 202 Accepted
+api-1  | INFO:     172.18.0.1:46098 - "GET /api/task/93562dee-fe09-408b-8a13-ced15ea4a02d HTTP/1.1" 500 Internal Server Error
+api-1  | ERROR:    Exception in ASGI application
+api-1  | Traceback (most recent call last):
+api-1  |   File "/usr/local/lib/python3.11/site-packages/uvicorn/protocols/http/httptools_impl.py", line 409, in run_asgi
+api-1  |     result = await app(  # type: ignore[func-returns-value]
+api-1  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+api-1  |   File "/usr/local/lib/python3.11/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+api-1  |     return await self.app(scope, receive, send)
+api-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+api-1  |   File "/usr/local/lib/python3.11/site-packages/fastapi/applications.py", line 1054, in __call__
+api-1  |     await super().__call__(scope, receive, send)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/applications.py", line 112, in __call__
+api-1  |     await self.middleware_stack(scope, receive, send)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py", line 187, in __call__
+api-1  |     raise exc
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py", line 165, in __call__
+api-1  |     await self.app(scope, receive, _send)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/middleware/exceptions.py", line 62, in __call__
+api-1  |     await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+api-1  |     raise exc
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+api-1  |     await app(scope, receive, sender)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/routing.py", line 714, in __call__
+api-1  |     await self.middleware_stack(scope, receive, send)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/routing.py", line 734, in app
+api-1  |     await route.handle(scope, receive, send)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/routing.py", line 288, in handle
+api-1  |     await self.app(scope, receive, send)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/routing.py", line 76, in app
+api-1  |     await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+api-1  |     raise exc
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+api-1  |     await app(scope, receive, sender)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/routing.py", line 73, in app
+api-1  |     response = await f(request)
+api-1  |                ^^^^^^^^^^^^^^^^
+api-1  |   File "/usr/local/lib/python3.11/site-packages/fastapi/routing.py", line 301, in app
+api-1  |     raw_response = await run_endpoint_function(
+api-1  |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+api-1  |   File "/usr/local/lib/python3.11/site-packages/fastapi/routing.py", line 212, in run_endpoint_function
+api-1  |     return await dependant.call(**values)
+api-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+api-1  |   File "/app/src/literature_parser_backend/web/api/task.py", line 46, in get_task_status
+api-1  |     return TaskStatusDTO(**response_data)
+api-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+api-1  |   File "/usr/local/lib/python3.11/site-packages/pydantic/main.py", line 253, in __init__
+api-1  |     validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+api-1  |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+api-1  | pydantic_core._pydantic_core.ValidationError: 2 validation errors for TaskStatusDTO
+api-1  | created_at
+api-1  |   Field required [type=missing, input_value={'task_id': '93562dee-fe0...d', 'status': 'pending'}, input_type=dict]
+api-1  |     For further information visit https://errors.pydantic.dev/2.11/v/missing
+api-1  | updated_at
+api-1  |   Field required [type=missing, input_value={'task_id': '93562dee-fe0...d', 'status': 'pending'}, input_type=dict]
+api-1  |     For further information visit https://errors.pydantic.dev/2.11/v/missing
+api-1  | 2025-07-16 15:51:03.046 | INFO     | literature_parser_backend.web.api.literature:create_literature:174 - Received submission, creating task with data: {'pdf_url': 'https://arxiv.org/pdf/1706.03762.pdf'}
+api-1  | 2025-07-16 15:51:03.047 | INFO     | literature_parser_backend.web.api.literature:create_literature:179 - Task eecccbab-77d4-43a7-aac1-1fda11049a25 created for processing.
+api-1  | INFO:     172.18.0.1:46102 - "POST /api/literature HTTP/1.1" 202 Accepted
+api-1  | INFO:     172.18.0.1:46112 - "GET /api/task/eecccbab-77d4-43a7-aac1-1fda11049a25 HTTP/1.1" 500 Internal Server Error
+api-1  | ERROR:    Exception in ASGI application
+api-1  | Traceback (most recent call last):
+api-1  |   File "/usr/local/lib/python3.11/site-packages/uvicorn/protocols/http/httptools_impl.py", line 409, in run_asgi
+api-1  |     result = await app(  # type: ignore[func-returns-value]
+api-1  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+api-1  |   File "/usr/local/lib/python3.11/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+api-1  |     return await self.app(scope, receive, send)
+api-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+api-1  |   File "/usr/local/lib/python3.11/site-packages/fastapi/applications.py", line 1054, in __call__
+api-1  |     await super().__call__(scope, receive, send)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/applications.py", line 112, in __call__
+api-1  |     await self.middleware_stack(scope, receive, send)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py", line 187, in __call__
+api-1  |     raise exc
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py", line 165, in __call__
+api-1  |     await self.app(scope, receive, _send)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/middleware/exceptions.py", line 62, in __call__
+api-1  |     await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+api-1  |     raise exc
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+api-1  |     await app(scope, receive, sender)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/routing.py", line 714, in __call__
+api-1  |     await self.middleware_stack(scope, receive, send)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/routing.py", line 734, in app
+api-1  |     await route.handle(scope, receive, send)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/routing.py", line 288, in handle
+api-1  |     await self.app(scope, receive, send)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/routing.py", line 76, in app
+api-1  |     await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+api-1  |     raise exc
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+api-1  |     await app(scope, receive, sender)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/routing.py", line 73, in app
+api-1  |     response = await f(request)
+api-1  |                ^^^^^^^^^^^^^^^^
+api-1  |   File "/usr/local/lib/python3.11/site-packages/fastapi/routing.py", line 301, in app
+api-1  |     raw_response = await run_endpoint_function(
+api-1  |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+api-1  |   File "/usr/local/lib/python3.11/site-packages/fastapi/routing.py", line 212, in run_endpoint_function
+api-1  |     return await dependant.call(**values)
+api-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+api-1  |   File "/app/src/literature_parser_backend/web/api/task.py", line 46, in get_task_status
+api-1  |     return TaskStatusDTO(**response_data)
+api-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+api-1  |   File "/usr/local/lib/python3.11/site-packages/pydantic/main.py", line 253, in __init__
+api-1  |     validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+api-1  |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+api-1  | pydantic_core._pydantic_core.ValidationError: 2 validation errors for TaskStatusDTO
+api-1  | created_at
+api-1  |   Field required [type=missing, input_value={'task_id': 'eecccbab-77d...5', 'status': 'pending'}, input_type=dict]
+api-1  |     For further information visit https://errors.pydantic.dev/2.11/v/missing
+api-1  | updated_at
+api-1  |   Field required [type=missing, input_value={'task_id': 'eecccbab-77d...5', 'status': 'pending'}, input_type=dict]
+api-1  |     For further information visit https://errors.pydantic.dev/2.11/v/missing
+api-1  | 2025-07-16 15:51:03.060 | INFO     | literature_parser_backend.web.api.literature:create_literature:174 - Received submission, creating task with data: {'doi': '10.48550/arXiv.1706.03762'}
+api-1  | 2025-07-16 15:51:03.061 | INFO     | literature_parser_backend.web.api.literature:create_literature:179 - Task 811dee40-40c7-4085-bbb2-93e10cf970fb created for processing.
+api-1  | INFO:     172.18.0.1:46126 - "POST /api/literature HTTP/1.1" 202 Accepted
+api-1  | INFO:     172.18.0.1:46128 - "GET /api/task/811dee40-40c7-4085-bbb2-93e10cf970fb HTTP/1.1" 500 Internal Server Error
+api-1  | ERROR:    Exception in ASGI application
+api-1  | Traceback (most recent call last):
+api-1  |   File "/usr/local/lib/python3.11/site-packages/uvicorn/protocols/http/httptools_impl.py", line 409, in run_asgi
+api-1  |     result = await app(  # type: ignore[func-returns-value]
+api-1  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+api-1  |   File "/usr/local/lib/python3.11/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+api-1  |     return await self.app(scope, receive, send)
+api-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+api-1  |   File "/usr/local/lib/python3.11/site-packages/fastapi/applications.py", line 1054, in __call__
+api-1  |     await super().__call__(scope, receive, send)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/applications.py", line 112, in __call__
+api-1  |     await self.middleware_stack(scope, receive, send)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py", line 187, in __call__
+api-1  |     raise exc
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py", line 165, in __call__
+api-1  |     await self.app(scope, receive, _send)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/middleware/exceptions.py", line 62, in __call__
+api-1  |     await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+api-1  |     raise exc
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+api-1  |     await app(scope, receive, sender)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/routing.py", line 714, in __call__
+api-1  |     await self.middleware_stack(scope, receive, send)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/routing.py", line 734, in app
+api-1  |     await route.handle(scope, receive, send)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/routing.py", line 288, in handle
+api-1  |     await self.app(scope, receive, send)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/routing.py", line 76, in app
+api-1  |     await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+api-1  |     raise exc
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+api-1  |     await app(scope, receive, sender)
+api-1  |   File "/usr/local/lib/python3.11/site-packages/starlette/routing.py", line 73, in app
+api-1  |     response = await f(request)
+api-1  |                ^^^^^^^^^^^^^^^^
+api-1  |   File "/usr/local/lib/python3.11/site-packages/fastapi/routing.py", line 301, in app
+api-1  |     raw_response = await run_endpoint_function(
+api-1  |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+api-1  |   File "/usr/local/lib/python3.11/site-packages/fastapi/routing.py", line 212, in run_endpoint_function
+api-1  |     return await dependant.call(**values)
+api-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+api-1  |   File "/app/src/literature_parser_backend/web/api/task.py", line 46, in get_task_status
+api-1  |     return TaskStatusDTO(**response_data)
+api-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+api-1  |   File "/usr/local/lib/python3.11/site-packages/pydantic/main.py", line 253, in __init__
+api-1  |     validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+api-1  |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+api-1  | pydantic_core._pydantic_core.ValidationError: 2 validation errors for TaskStatusDTO
+api-1  | created_at
+api-1  |   Field required [type=missing, input_value={'task_id': '811dee40-40c...b', 'status': 'pending'}, input_type=dict]
+api-1  |     For further information visit https://errors.pydantic.dev/2.11/v/missing
+api-1  | updated_at
+api-1  |   Field required [type=missing, input_value={'task_id': '811dee40-40c...b', 'status': 'pending'}, input_type=dict]
+api-1  |     For further information visit https://errors.pydantic.dev/2.11/v/missing
