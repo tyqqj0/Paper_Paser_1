@@ -165,17 +165,20 @@ async def create_literature(
     try:
         effective_values = literature_data.get_effective_values()
 
-        if not any(key in effective_values for key in ["doi", "arxiv_id", "url", "pdf_url", "title"]):
+        if not any(
+            key in effective_values
+            for key in ["doi", "arxiv_id", "url", "pdf_url", "title"]
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="At least one identifier must be provided.",
             )
 
         logger.info(f"Received submission, creating task with data: {effective_values}")
-        
+
         # Directly create a task without any synchronous checks.
         task = process_literature_task.delay(effective_values)
-        
+
         logger.info(f"Task {task.id} created for processing.")
 
         return JSONResponse(

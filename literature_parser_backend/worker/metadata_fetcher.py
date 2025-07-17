@@ -8,11 +8,11 @@ architecture document, trying different data sources in priority order.
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
-from ..models.literature import AuthorModel, IdentifiersModel, MetadataModel
+from ..models.literature import AuthorModel, MetadataModel
 from ..services.crossref import CrossRefClient
+from ..services.grobid import GrobidClient
 from ..services.semantic_scholar import SemanticScholarClient
 from ..settings import Settings
-from ..services.grobid import GrobidClient
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +102,7 @@ class MetadataFetcher:
                 header_data = grobid_client.process_header_only(pdf_content)
                 if header_data:
                     from ..worker.utils import convert_grobid_to_metadata
+
                     metadata = convert_grobid_to_metadata(header_data)
                     raw_data["grobid"] = header_data
                     source_priority.append("GROBID")

@@ -120,7 +120,7 @@ async def create_indexes() -> None:
             logger.warning("'arxiv_id_index' not found, skipping.")
 
         logger.info("Creating new smart indexes...")
-        
+
         # 唯一索引：只对非null值生效，避免重复键错误
         await collection.create_index(
             [("identifiers.doi", 1)],
@@ -136,7 +136,7 @@ async def create_indexes() -> None:
             partialFilterExpression={"identifiers.arxiv_id": {"$type": "string"}},
             background=True,
         )
-        
+
         # 内容指纹唯一索引
         await collection.create_index(
             [("identifiers.fingerprint", 1)],
@@ -192,15 +192,16 @@ async def health_check() -> bool:
 # Task-level connection management
 # ===============================================
 
+
 async def create_task_connection(
     settings: Optional[Settings] = None,
 ) -> Tuple[AsyncIOMotorClient[Dict[str, Any]], AsyncIOMotorDatabase[Dict[str, Any]]]:
     """
     Create a dedicated database connection for a single task.
-    
+
     This function creates a fresh connection that is isolated from the global
     connection pool, preventing event loop conflicts in Celery tasks.
-    
+
     :param settings: Application settings (optional)
     :return: Tuple of (client, database) for the task
     """
@@ -235,7 +236,7 @@ async def create_task_connection(
 async def close_task_connection(client: AsyncIOMotorClient[Dict[str, Any]]) -> None:
     """
     Close a task-level database connection.
-    
+
     :param client: MongoDB client to close
     """
     try:
@@ -251,7 +252,7 @@ def get_task_collection(
 ) -> AsyncIOMotorCollection[Dict[str, Any]]:
     """
     Get the literature collection from a task-level database connection.
-    
+
     :param database: Task-level database instance
     :return: Literature collection instance
     """
@@ -263,18 +264,18 @@ async def create_task_indexes(
 ) -> None:
     """
     Create necessary indexes for a task-level database connection.
-    
+
     This is a lightweight version of create_indexes() that only creates
     essential indexes needed for task operations.
-    
+
     :param database: Task-level database instance
     """
     try:
         collection = get_task_collection(database)
-        
+
         # Only create essential indexes for task operations
         logger.info("Creating essential indexes for task...")
-        
+
         # 唯一索引：只对非null值生效，避免重复键错误
         await collection.create_index(
             [("identifiers.doi", 1)],
@@ -290,7 +291,7 @@ async def create_task_indexes(
             partialFilterExpression={"identifiers.arxiv_id": {"$type": "string"}},
             background=True,
         )
-        
+
         # 内容指纹唯一索引
         await collection.create_index(
             [("identifiers.fingerprint", 1)],

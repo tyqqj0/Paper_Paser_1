@@ -67,7 +67,7 @@ class ReferencesFetcher:
                     )
                     # If we get results from S2, we are done.
                     if references:
-                         return references, raw_data
+                        return references, raw_data
             except Exception as e:
                 logger.warning(
                     "Semantic Scholar API for references failed: %s. "
@@ -81,20 +81,23 @@ class ReferencesFetcher:
             try:
                 # Use the 'processReferences' service for better performance
                 grobid_data = self.grobid_client.process_pdf(
-                    pdf_content, service="processReferences"
+                    pdf_content,
+                    service="processReferences",
                 )
                 if grobid_data and isinstance(grobid_data, list):
                     raw_data["grobid"] = grobid_data
                     # Placeholder for a proper TEI XML to ReferenceModel conversion
                     for ref_text in grobid_data:
                         references.append(
-                            ReferenceModel(raw_text=ref_text, source="grobid_fallback")
+                            ReferenceModel(raw_text=ref_text, source="grobid_fallback"),
                         )
                     logger.info(
-                        f"✅ Successfully parsed {len(references)} reference strings from PDF."
+                        f"✅ Successfully parsed {len(references)} reference strings from PDF.",
                     )
                 else:
-                    logger.warning(f"GROBID did not return a list of references. Output: {grobid_data}")
+                    logger.warning(
+                        f"GROBID did not return a list of references. Output: {grobid_data}",
+                    )
             except Exception as e:
                 logger.error(f"GROBID reference parsing failed: {e}", exc_info=True)
 

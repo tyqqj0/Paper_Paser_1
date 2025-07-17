@@ -243,3 +243,57 @@ graph TD
 ## 8\. 总结
 
 本架构方案整合了现代Python后端的最佳实践，通过清晰的微服务划分、强大的异步任务处理和智能的数据处理流程，为文献解析与管理系统提供了一个坚实、高效、可扩展的基础。从这个起点出发，开发团队可以更专注于实现核心业务功能，而非陷入繁琐的基础架构搭建工作。
+
+
+
+-----
+## 查重功能更新
+
+sequenceDiagram
+    participant User
+    participant API
+    participant Worker
+    participant GROBID
+    participant Database
+
+    User->>API: 提交请求 (只含PDF URL)
+    API->>Worker: 立即创建任务 (不做复杂去重)
+    API-->>User: 返回任务ID (202 Accepted)
+    
+    Note right of Worker: 任务开始执行
+    Worker->>GROBID: **步骤1: 解析PDF头部 (获取元数据)**
+    GROBID-->>Worker: 返回Title, Authors等
+    Worker->>Database: **步骤2: 使用解析出的元数据进行瀑布流去重**
+    
+    alt 文献已存在
+        Database-->>Worker: 返回现有文献ID
+        Worker->>Database: 更新任务状态为“重复”
+        Note right of Worker: 任务提前结束
+    else 文献不存在
+        Database-->>Worker: 未找到
+        Worker->>Worker: **步骤3: 继续执行完整的解析流程 (Metadata, Content, References)**
+        Note right of Worker: 使用已解析的元数据，避免重复GROBID调用
+        Worker->>Database: 保存新文献
+    end
+
+
+1. literature.py 文件修改的解释
+我们对 literature_parser_backend/web/api/literature.py 文件的核心修改，都集中在 create_literature 这个函数上。
+修改前的逻辑是“同步去重”：
+当API收到一个请求时，它会立刻拿着请求中的DOI、ArXiv ID等信息去同步地查询数据库，看看文献是否已经存在。
+如果存在，它就直接返回一个200 OK响应，告诉用户“文献已存在”。
+如果不存在，它才会去创建一个后台任务。
+这种做法的缺点是：
+API响应慢：因为必须等待数据库查询完成，如果数据库慢，API就会被拖慢。
+无法处理“只传PDF”的情况：如果用户只给了一个PDF，API没法在不知道其标题的情况下进行有效去重，这违背了我们支持PDF优先的目标。
+修改后的逻辑是“纯异步任务创建”：
+现在，create_literature 函数的职责被大大简化了，它变得非常“轻快”：
+接收请求：接收用户提交的任何信息（DOI, PDF URL, Title等）。
+快速验证：只做一个最基本的检查，确保用户至少提供了一种有效信息。
+立即创建任务：它不再进行任何数据库查询，而是把所有信息直接打包，交给后台的Celery Worker去创建一个异步处理任务。
+立刻返回响应：马上返回一个 202 Accepted 响应，并附上一个 task_id。
+这样做的好处是：
+API响应极快：用户几乎可以瞬间得到响应，大大提升了用户体验。
+逻辑更健壮：所有复杂的、耗时的去重和处理逻辑，都交给了后台的Worker。即使去重需要下载PDF、调用GROBID，也不会阻塞API。这完美地实现了我们设计的先解析后去重的智能流程。
+简单来说，这次修改就是把“在门口拦人（同步去重）”的保安，变成了“先进来再登记（异步去重）”的流程管理员，整个系统变得更加高效和强大。
+

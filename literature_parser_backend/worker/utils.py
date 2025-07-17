@@ -2,7 +2,6 @@
 Worker utility functions.
 """
 
-import hashlib
 import re
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
@@ -80,17 +79,26 @@ def convert_grobid_to_metadata(grobid_data: Dict[str, Any]) -> MetadataModel:
     """Convert GROBID output to MetadataModel."""
     header = grobid_data.get("TEI", {}).get("teiHeader", {}).get("fileDesc", {})
     title_stmt = header.get("titleStmt", {})
-    
+
     title = title_stmt.get("title", {}).get("#text")
-    
+
     authors = []
-    author_list = header.get("sourceDesc", {}).get("biblStruct", {}).get("analytic", {}).get("author", [])
-    if isinstance(author_list, dict): # handle case where there is only one author
+    author_list = (
+        header.get("sourceDesc", {})
+        .get("biblStruct", {})
+        .get("analytic", {})
+        .get("author", [])
+    )
+    if isinstance(author_list, dict):  # handle case where there is only one author
         author_list = [author_list]
 
     for author_data in author_list:
         pers_name = author_data.get("persName", {})
-        forenames = [fn.get("#text") for fn in pers_name.get("forename", []) if isinstance(fn, dict)]
+        forenames = [
+            fn.get("#text")
+            for fn in pers_name.get("forename", [])
+            if isinstance(fn, dict)
+        ]
         surname = pers_name.get("surname", {}).get("#text")
         full_name = " ".join(forenames) + (f" {surname}" if surname else "")
         authors.append(AuthorModel(name=full_name.strip()))
@@ -102,4 +110,4 @@ def convert_grobid_to_metadata(grobid_data: Dict[str, Any]) -> MetadataModel:
         journal=None,
         abstract=header.get("profileDesc", {}).get("abstract", {}).get("#text"),
         source_priority=["grobid"],
-    ) 
+    )
