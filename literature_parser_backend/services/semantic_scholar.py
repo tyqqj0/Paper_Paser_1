@@ -9,10 +9,10 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
-import requests
-from requests.exceptions import RequestException, Timeout
+from requests.exceptions import RequestException
 
 from ..settings import Settings
+from .request_manager import ExternalRequestManager, RequestType
 
 logger = logging.getLogger(__name__)
 
@@ -83,8 +83,12 @@ class SemanticScholarClient:
             "externalIds",
         ]
 
-        self.session = requests.Session()
-        self.session.headers.update(self.headers)
+        # Use external request manager for all HTTP requests
+        self.request_manager = ExternalRequestManager(settings)
+
+        # Set custom headers for Semantic Scholar API
+        session = self.request_manager.get_session(RequestType.EXTERNAL)
+        session.headers.update(self.headers)
 
     def get_metadata(
         self,
@@ -143,7 +147,12 @@ class SemanticScholarClient:
         }
 
         try:
-            response = self.session.get(url, params=params, timeout=self.timeout)
+            response = self.request_manager.get(
+                url=url,
+                request_type=RequestType.EXTERNAL,
+                params=params,
+                timeout=self.timeout,
+            )
             if response.status_code == 200:
                 data = response.json()
                 return self._parse_paper_data(data)
@@ -152,9 +161,6 @@ class SemanticScholarClient:
                 return None
             else:
                 response.raise_for_status()
-        except Timeout:
-            logger.error(f"Semantic Scholar API timeout for: {identifier}")
-            raise Exception("Semantic Scholar API request timed out")
         except RequestException as e:
             logger.error(f"Semantic Scholar API error for {identifier}: {e}")
             raise Exception(f"Semantic Scholar API request failed: {e!s}")
@@ -207,7 +213,12 @@ class SemanticScholarClient:
         }
 
         try:
-            response = self.session.get(url, params=params, timeout=self.timeout)
+            response = self.request_manager.get(
+                url=url,
+                request_type=RequestType.EXTERNAL,
+                params=params,
+                timeout=self.timeout,
+            )
             if response.status_code == 200:
                 data = response.json()
                 references = []

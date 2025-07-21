@@ -2,7 +2,14 @@
   "permissions": {
     "allow": [
       "Bash(python tests/scripts/check_services.py)",
-      "Bash(python3 tests/scripts/check_services.py)"
+      "Bash(python3 tests/scripts/check_services.py)",
+      "Bash(python:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git config:*)",
+      "Bash(touch:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)"
     ],
     "deny": []
   }

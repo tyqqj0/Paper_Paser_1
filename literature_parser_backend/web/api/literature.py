@@ -186,7 +186,7 @@ async def create_literature(
             content={
                 "message": "Literature processing task created.",
                 "task_id": task.id,
-                "status_url": f"/api/task/status/{task.id}",
+                "status_url": f"/api/task/{task.id}",
             },
         )
 

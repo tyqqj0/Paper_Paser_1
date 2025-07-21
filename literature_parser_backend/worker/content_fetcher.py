@@ -25,10 +25,13 @@ class ContentFetcher:
     def __init__(self, settings: Optional[Settings] = None):
         """Initialize content fetcher with required clients."""
         self.settings = settings or Settings()
-        self.client = requests.Session()
-        self.client.proxies = self.settings.get_proxy_dict()
         self.timeout = self.settings.external_api_timeout
         self.grobid_client = GrobidClient(settings)
+
+        # Use external request manager for PDF downloads
+        from ..services.request_manager import ExternalRequestManager
+
+        self.request_manager = ExternalRequestManager(settings)
 
     def fetch_content_waterfall(
         self,
@@ -94,7 +97,11 @@ class ContentFetcher:
         """Download a PDF from a given URL."""
         try:
             logger.info(f"Attempting to download PDF from URL: {url}")
-            response = self.client.get(url, timeout=self.timeout)
+            from ..services.request_manager import RequestType
+
+            response = self.request_manager.get(
+                url=url, request_type=RequestType.EXTERNAL, timeout=self.timeout,
+            )
             response.raise_for_status()
             logger.info(f"Successfully downloaded PDF: {len(response.content)} bytes.")
 
@@ -129,6 +136,22 @@ class ContentFetcher:
                     logger.warning(
                         "DEBUG: PDF header verification FAILED - not a valid PDF",
                     )
+                    # 检查是否是HTML重定向页面
+                    if response.content.startswith(
+                        b"<!DOCTYPE",
+                    ) or response.content.startswith(b"<html"):
+                        logger.warning(
+                            "DEBUG: Downloaded content appears to be HTML, not PDF",
+                        )
+                        # 如果是ArXiv DOI，尝试使用ArXiv PDF URL
+                        if "arxiv" in url.lower() and "10.48550" in url:
+                            arxiv_id = self._extract_arxiv_id_from_url(url)
+                            if arxiv_id:
+                                logger.info(
+                                    f"DEBUG: Attempting to download from ArXiv PDF URL for {arxiv_id}",
+                                )
+                                return self._download_arxiv_pdf(arxiv_id)
+                    return None
 
             except Exception as e:
                 logger.error(f"DEBUG: Failed to save PDF for debugging: {e}")
@@ -142,6 +165,44 @@ class ContentFetcher:
         except requests.RequestException as e:
             logger.error(f"Request error downloading PDF from {url}: {e}")
         return None
+
+    def _extract_arxiv_id_from_url(self, url: str) -> Optional[str]:
+        """Extract ArXiv ID from URL patterns."""
+        import re
+
+        # Pattern for 10.48550/arXiv.XXXX.XXXXX
+        pattern = r"10\.48550[/%]arXiv\.(\d{4}\.\d{4,5})"
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+        return None
+
+    def _download_arxiv_pdf(self, arxiv_id: str) -> Optional[bytes]:
+        """Download PDF directly from ArXiv."""
+        arxiv_pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+        logger.info(f"Attempting to download ArXiv PDF from: {arxiv_pdf_url}")
+
+        try:
+            response = self.request_manager.get(
+                url=arxiv_pdf_url,
+                request_type=RequestType.EXTERNAL,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+
+            # Verify it's a valid PDF
+            if response.content.startswith(b"%PDF-"):
+                logger.info(
+                    f"✅ Successfully downloaded ArXiv PDF: {len(response.content)} bytes",
+                )
+                return response.content
+            else:
+                logger.warning("❌ ArXiv PDF download failed - invalid PDF format")
+                return None
+
+        except Exception as e:
+            logger.error(f"❌ Failed to download ArXiv PDF: {e}")
+            return None
 
     def _infer_pdf_urls(
         self,
@@ -170,7 +231,8 @@ class ContentFetcher:
         return None
 
     def _parse_pdf_with_grobid(
-        self, pdf_content: bytes,
+        self,
+        pdf_content: bytes,
     ) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
         """
         Parse PDF content using GROBID and structure it for caching.
@@ -195,7 +257,8 @@ class ContentFetcher:
         try:
             # Use GROBID to parse the full document
             grobid_result = self.grobid_client.process_pdf(
-                pdf_content, "process_fulltext",
+                pdf_content,
+                "process_fulltext",
             )
 
             if not grobid_result or grobid_result.get("status") != "success":
@@ -239,7 +302,8 @@ class ContentFetcher:
             return None, processing_info
 
     def _structure_grobid_content(
-        self, grobid_result: Dict[str, Any],
+        self,
+        grobid_result: Dict[str, Any],
     ) -> Dict[str, Any]:
         """
         Structure GROBID parsing result into our standardized format.

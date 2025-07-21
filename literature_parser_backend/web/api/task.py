@@ -13,9 +13,11 @@ from ...worker.celery_app import celery_app
 router = APIRouter(prefix="/task", tags=["任务管理"])
 
 
-@router.get("/{task_id}", response_model=TaskStatusDTO, summary="Query task status")
+@router.get(
+    "/{task_id}", response_model=TaskStatusDTO, summary="Query enhanced task status",
+)
 async def get_task_status(task_id: str) -> TaskStatusDTO:
-    """Query the status and result of a Celery task with granular details."""
+    """Query the status and result of a Celery task with enhanced granular details."""
     task_result = AsyncResult(task_id, app=celery_app)
     dao = LiteratureDAO()
 
@@ -24,15 +26,43 @@ async def get_task_status(task_id: str) -> TaskStatusDTO:
     if task_result.info and isinstance(task_result.info, dict):
         response_data["details"] = task_result.info
 
-        # If literature_id is available, fetch granular status from DB
+        # If literature_id is available, fetch enhanced granular status from DB
         literature_id = task_result.info.get("literature_id")
         if literature_id:
             literature = await dao.get_literature_by_id(literature_id)
             if literature and literature.task_info:
-                response_data["component_status"] = (
-                    literature.task_info.component_status
-                )
+                # Use enhanced component status if available
+                component_status = literature.task_info.component_status
+                if hasattr(component_status, "metadata"):
+                    # New enhanced format
+                    response_data["component_status"] = component_status
+                else:
+                    # Convert legacy format to enhanced format
+                    from ...models.task import ComponentStatus, EnhancedComponentStatus
+
+                    enhanced_status = ComponentStatus(
+                        metadata=EnhancedComponentStatus(
+                            status=component_status.get("metadata", "pending"),
+                            stage=f"状态: {component_status.get('metadata', 'pending')}",
+                        ),
+                        content=EnhancedComponentStatus(
+                            status=component_status.get("content", "pending"),
+                            stage=f"状态: {component_status.get('content', 'pending')}",
+                        ),
+                        references=EnhancedComponentStatus(
+                            status=component_status.get("references", "pending"),
+                            stage=f"状态: {component_status.get('references', 'pending')}",
+                        ),
+                    )
+                    response_data["component_status"] = enhanced_status
+
                 response_data["literature_id"] = literature_id
+
+                # Add enhanced fields
+                if literature.task_info.created_at:
+                    response_data["created_at"] = literature.task_info.created_at
+                if literature.task_info.completed_at:
+                    response_data["updated_at"] = literature.task_info.completed_at
 
     # Handle final states
     if task_result.ready():
@@ -40,6 +70,10 @@ async def get_task_status(task_id: str) -> TaskStatusDTO:
             result = task_result.result
             response_data["status"] = result.get("status", "success").lower()
             response_data["literature_id"] = result.get("literature_id")
+            if response_data["literature_id"]:
+                response_data["resource_url"] = (
+                    f"/api/v1/literature/{response_data['literature_id']}"
+                )
         else:
             response_data["status"] = "failure"
             response_data["details"] = {"error": str(task_result.info)}

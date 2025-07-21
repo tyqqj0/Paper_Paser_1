@@ -387,7 +387,9 @@ class LiteratureDAO:
             return None
 
     async def create_placeholder(
-        self, task_id: str, identifiers: IdentifiersModel,
+        self,
+        task_id: str,
+        identifiers: IdentifiersModel,
     ) -> str:
         """Create a placeholder literature document to reserve an ID and track status."""
         placeholder = LiteratureModel(
@@ -415,23 +417,392 @@ class LiteratureDAO:
             update_fields["task_info.error_message"] = message
 
         await self.collection.update_one(
-            {"_id": ObjectId(literature_id)}, {"$set": update_fields},
+            {"_id": ObjectId(literature_id)},
+            {"$set": update_fields},
         )
 
     async def finalize_literature(
-        self, literature_id: str, final_model: LiteratureModel,
+        self,
+        literature_id: str,
+        final_model: LiteratureModel,
     ) -> None:
         """Update the placeholder with the final, fully processed literature data."""
         # Get current document to preserve component_status
         current_doc = await self.collection.find_one({"_id": ObjectId(literature_id)})
-        
+
         final_doc = final_model.model_dump(by_alias=True, exclude={"id"})
         final_doc["updated_at"] = datetime.now()
-        final_doc["task_info"]["status"] = "success"
+
+        # Calculate overall status based on component statuses instead of always "success"
+        if (
+            current_doc
+            and "task_info" in current_doc
+            and "component_status" in current_doc["task_info"]
+        ):
+            component_status = current_doc["task_info"]["component_status"]
+            final_doc["task_info"]["component_status"] = component_status
+            # Calculate overall status based on component statuses
+            overall_status = await self._calculate_overall_status(component_status)
+            final_doc["task_info"]["status"] = overall_status
+        else:
+            final_doc["task_info"]["status"] = "success"  # Fallback
+
         final_doc["task_info"]["completed_at"] = datetime.now()
-        
-        # Preserve existing component_status if it exists
-        if current_doc and "task_info" in current_doc and "component_status" in current_doc["task_info"]:
-            final_doc["task_info"]["component_status"] = current_doc["task_info"]["component_status"]
 
         await self.collection.replace_one({"_id": ObjectId(literature_id)}, final_doc)
+
+    async def _calculate_overall_status(self, component_status: Dict[str, Any]) -> str:
+        """
+        Calculate overall task status based on enhanced component statuses.
+
+        New Logic (stricter failure handling):
+        - Critical components: metadata + references (both required)
+        - Optional component: content (nice to have)
+        - If any critical component is still processing: processing
+        - If all critical components are successful: success
+        - If any critical component failed: failed (stricter logic)
+        - If no critical components failed but some are still pending: partial_success
+        """
+        # Extract component statuses - handle both old and new formats
+        if isinstance(component_status.get("metadata"), dict):
+            # New enhanced format
+            metadata_status = component_status.get("metadata", {}).get(
+                "status", "pending",
+            )
+            content_status = component_status.get("content", {}).get(
+                "status", "pending",
+            )
+            references_status = component_status.get("references", {}).get(
+                "status", "pending",
+            )
+        else:
+            # Old simple format (backward compatibility)
+            metadata_status = component_status.get("metadata", "pending")
+            content_status = component_status.get("content", "pending")
+            references_status = component_status.get("references", "pending")
+
+        # Check if any critical component is still processing
+        critical_statuses = [
+            metadata_status,
+            references_status,
+        ]  # Updated: references is now critical
+        if any(status == "processing" for status in critical_statuses):
+            return "processing"
+
+        # Count successful and failed critical components
+        successful_critical = sum(
+            1 for status in critical_statuses if status == "success"
+        )
+        failed_critical = sum(1 for status in critical_statuses if status == "failed")
+
+        # Decision logic for critical components (stricter failure logic)
+        if successful_critical == len(critical_statuses):
+            # All critical components succeeded, but check if content failed
+            if content_status == "failed":
+                return "partial_success"  # Critical success but content failed
+            else:
+                return "success"  # Full success
+        elif failed_critical > 0:
+            # If any critical component failed, the entire task is failed
+            return "failed"
+        else:
+            # Only show partial_success if no critical components failed but some are still pending
+            return "partial_success"
+
+    async def update_component_status_smart(
+        self,
+        literature_id: str,
+        component: str,
+        status: str,
+        message: Optional[str] = None,
+    ) -> str:
+        """
+        Smart update of component status with automatic overall status calculation.
+
+        Args:
+            literature_id: ID of the literature document
+            component: Component name ('metadata', 'content', 'references')
+            status: New status ('pending', 'processing', 'success', 'failed')
+            message: Optional error message
+
+        Returns:
+            The calculated overall task status
+        """
+        # Update component status
+        update_fields = {
+            f"task_info.component_status.{component}": status,
+            "updated_at": datetime.now(),
+        }
+        if message:
+            update_fields["task_info.error_message"] = message
+
+        await self.collection.update_one(
+            {"_id": ObjectId(literature_id)},
+            {"$set": update_fields},
+        )
+
+        # Get updated document to calculate overall status
+        updated_doc = await self.collection.find_one({"_id": ObjectId(literature_id)})
+        if (
+            updated_doc
+            and "task_info" in updated_doc
+            and "component_status" in updated_doc["task_info"]
+        ):
+            component_status = updated_doc["task_info"]["component_status"]
+            overall_status = await self._calculate_overall_status(component_status)
+
+            # Update overall status
+            await self.collection.update_one(
+                {"_id": ObjectId(literature_id)},
+                {"$set": {"task_info.status": overall_status}},
+            )
+
+            return overall_status
+
+        return "unknown"
+
+    async def sync_task_status(self, literature_id: str) -> str:
+        """
+        Synchronize task status by recalculating overall status from component statuses.
+
+        Args:
+            literature_id: ID of the literature document
+
+        Returns:
+            The synchronized overall task status
+        """
+        doc = await self.collection.find_one({"_id": ObjectId(literature_id)})
+        if not doc:
+            logger.error(
+                f"Literature document {literature_id} not found for status sync",
+            )
+            return "unknown"
+
+        if "task_info" not in doc or "component_status" not in doc["task_info"]:
+            logger.warning(f"No component status found for literature {literature_id}")
+            return "unknown"
+
+        component_status = doc["task_info"]["component_status"]
+        overall_status = await self._calculate_overall_status(component_status)
+
+        # Update overall status if different
+        current_overall = doc["task_info"].get("status", "unknown")
+        if current_overall != overall_status:
+            await self.collection.update_one(
+                {"_id": ObjectId(literature_id)},
+                {
+                    "$set": {
+                        "task_info.status": overall_status,
+                        "updated_at": datetime.now(),
+                    },
+                },
+            )
+            logger.info(
+                f"Synchronized task status for {literature_id}: {current_overall} -> {overall_status}",
+            )
+
+        return overall_status
+
+    async def update_enhanced_component_status(
+        self,
+        literature_id: str,
+        component: str,
+        status: str,
+        stage: str,
+        progress: int = 0,
+        error_info: Optional[Dict[str, Any]] = None,
+        source: Optional[str] = None,
+        next_action: Optional[str] = None,
+        dependencies_met: bool = True,
+    ) -> str:
+        """
+        Update enhanced component status with detailed information.
+
+        Args:
+            literature_id: ID of the literature document
+            component: Component name ('metadata', 'content', 'references')
+            status: New status ('pending', 'processing', 'success', 'failed', 'waiting', 'skipped')
+            stage: Detailed stage description
+            progress: Progress percentage (0-100)
+            error_info: Error information if failed
+            source: Data source that succeeded
+            next_action: Description of next action
+            dependencies_met: Whether dependencies are satisfied
+
+        Returns:
+            The calculated overall task status
+        """
+        from datetime import datetime
+
+        now = datetime.now()
+
+        # Prepare update fields for enhanced component status
+        update_fields = {
+            f"task_info.component_status.{component}.status": status,
+            f"task_info.component_status.{component}.stage": stage,
+            f"task_info.component_status.{component}.progress": progress,
+            f"task_info.component_status.{component}.dependencies_met": dependencies_met,
+            "updated_at": now,
+        }
+
+        # Update timestamps based on status
+        if status == "processing":
+            update_fields[f"task_info.component_status.{component}.started_at"] = now
+            # Increment attempts
+            current_doc = await self.collection.find_one(
+                {"_id": ObjectId(literature_id)},
+            )
+            if current_doc:
+                current_attempts = (
+                    current_doc.get("task_info", {})
+                    .get("component_status", {})
+                    .get(component, {})
+                    .get("attempts", 0)
+                )
+                update_fields[f"task_info.component_status.{component}.attempts"] = (
+                    current_attempts + 1
+                )
+        elif status in ["success", "failed", "skipped"]:
+            update_fields[f"task_info.component_status.{component}.completed_at"] = now
+
+        # Add optional fields if provided
+        if error_info:
+            update_fields[f"task_info.component_status.{component}.error_info"] = (
+                error_info
+            )
+        if source:
+            update_fields[f"task_info.component_status.{component}.source"] = source
+        if next_action:
+            update_fields[f"task_info.component_status.{component}.next_action"] = (
+                next_action
+            )
+
+        # Update the document
+        await self.collection.update_one(
+            {"_id": ObjectId(literature_id)},
+            {"$set": update_fields},
+        )
+
+        # Get updated document to calculate overall status
+        updated_doc = await self.collection.find_one({"_id": ObjectId(literature_id)})
+        if (
+            updated_doc
+            and "task_info" in updated_doc
+            and "component_status" in updated_doc["task_info"]
+        ):
+            component_status = updated_doc["task_info"]["component_status"]
+            overall_status = await self._calculate_overall_status(component_status)
+
+            # Update overall status
+            await self.collection.update_one(
+                {"_id": ObjectId(literature_id)},
+                {"$set": {"task_info.status": overall_status}},
+            )
+
+            return overall_status
+
+        return "unknown"
+
+    async def check_component_dependencies(
+        self, literature_id: str, component: str,
+    ) -> bool:
+        """
+        Check if a component's dependencies are satisfied.
+
+        Args:
+            literature_id: ID of the literature document
+            component: Component name to check dependencies for
+
+        Returns:
+            True if dependencies are satisfied, False otherwise
+        """
+        doc = await self.collection.find_one({"_id": ObjectId(literature_id)})
+        if not doc:
+            return False
+
+        component_status = doc.get("task_info", {}).get("component_status", {})
+
+        # Define dependency rules
+        if component == "references":
+            # References depends on either metadata or content being successful
+            metadata_status = component_status.get("metadata", {}).get(
+                "status", "pending",
+            )
+            content_status = component_status.get("content", {}).get(
+                "status", "pending",
+            )
+
+            # References can proceed if metadata is successful OR content is successful
+            return metadata_status == "success" or content_status == "success"
+
+        # Metadata and content have no dependencies
+        return True
+
+    async def get_component_next_actions(self, literature_id: str) -> Dict[str, str]:
+        """
+        Get next actions for all components based on their current status.
+
+        Args:
+            literature_id: ID of the literature document
+
+        Returns:
+            Dictionary mapping component names to their next actions
+        """
+        doc = await self.collection.find_one({"_id": ObjectId(literature_id)})
+        if not doc:
+            return {}
+
+        component_status = doc.get("task_info", {}).get("component_status", {})
+        next_actions = {}
+
+        for component in ["metadata", "content", "references"]:
+            comp_status = component_status.get(component, {})
+            status = comp_status.get("status", "pending")
+
+            if status == "pending":
+                if component == "metadata":
+                    next_actions[component] = "准备从外部API获取元数据"
+                elif component == "content":
+                    next_actions[component] = "准备下载PDF文件"
+                elif component == "references":
+                    deps_met = await self.check_component_dependencies(
+                        literature_id, component,
+                    )
+                    if deps_met:
+                        next_actions[component] = "准备获取参考文献"
+                    else:
+                        next_actions[component] = "等待元数据或内容获取完成"
+            elif status == "processing":
+                next_actions[component] = (
+                    f"正在处理 - {comp_status.get('stage', '未知阶段')}"
+                )
+            elif status == "failed":
+                attempts = comp_status.get("attempts", 0)
+                max_attempts = comp_status.get("max_attempts", 3)
+                if attempts < max_attempts:
+                    next_actions[component] = f"准备重试 ({attempts}/{max_attempts})"
+                else:
+                    next_actions[component] = "已达到最大重试次数"
+
+        return next_actions
+
+    async def get_component_status(
+        self, literature_id: str,
+    ) -> Optional[Dict[str, str]]:
+        """
+        Get component status for a literature document.
+
+        Args:
+            literature_id: ID of the literature document
+
+        Returns:
+            Dictionary with component statuses or None if not found
+        """
+        doc = await self.collection.find_one({"_id": ObjectId(literature_id)})
+        if not doc:
+            return None
+
+        if "task_info" not in doc or "component_status" not in doc["task_info"]:
+            return None
+
+        return doc["task_info"]["component_status"]

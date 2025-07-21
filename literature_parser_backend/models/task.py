@@ -7,7 +7,7 @@ and communication between the API and background workers.
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, ClassVar, Dict, Optional
+from typing import Any, ClassVar, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -16,8 +16,86 @@ from pydantic import BaseModel, Field
 # ===============================
 
 
+class EnhancedComponentStatus(BaseModel):
+    """Enhanced status tracking for a single component with detailed information."""
+
+    status: str = Field(
+        default="pending",
+        description="Component status (pending/processing/success/failed/waiting/skipped)",
+    )
+    stage: str = Field(default="等待开始", description="Detailed stage description")
+    progress: int = Field(
+        default=0, description="Progress percentage (0-100)", ge=0, le=100,
+    )
+    error_info: Optional[Dict[str, Any]] = Field(
+        None, description="Error details if failed",
+    )
+    started_at: Optional[datetime] = Field(
+        None, description="When component processing started",
+    )
+    completed_at: Optional[datetime] = Field(
+        None, description="When component processing completed",
+    )
+    dependencies_met: bool = Field(
+        default=True, description="Whether dependencies are satisfied",
+    )
+    next_action: Optional[str] = Field(
+        None, description="Description of next action to be taken",
+    )
+    source: Optional[str] = Field(
+        None, description="Data source that succeeded (e.g., 'CrossRef API')",
+    )
+    attempts: int = Field(default=0, description="Number of attempts made")
+    max_attempts: int = Field(default=3, description="Maximum attempts allowed")
+
+    class Config:
+        json_schema_extra: ClassVar[Dict[str, Any]] = {
+            "example": {
+                "status": "success",
+                "stage": "元数据获取成功",
+                "progress": 100,
+                "error_info": None,
+                "started_at": "2024-01-15T10:30:00Z",
+                "completed_at": "2024-01-15T10:31:00Z",
+                "dependencies_met": True,
+                "next_action": None,
+                "source": "CrossRef API",
+                "attempts": 1,
+                "max_attempts": 3,
+            },
+        }
+
+
 class ComponentStatus(BaseModel):
-    """Represents the processing status of each component of a literature."""
+    """Enhanced component status tracking with detailed information for each component."""
+
+    metadata: EnhancedComponentStatus = Field(
+        default_factory=EnhancedComponentStatus,
+        description="Enhanced metadata fetching status",
+    )
+    content: EnhancedComponentStatus = Field(
+        default_factory=EnhancedComponentStatus,
+        description="Enhanced content fetching and parsing status",
+    )
+    references: EnhancedComponentStatus = Field(
+        default_factory=EnhancedComponentStatus,
+        description="Enhanced references fetching status",
+    )
+
+    def get_overall_progress(self) -> int:
+        """Calculate overall progress as average of all components."""
+        total_progress = (
+            self.metadata.progress + self.content.progress + self.references.progress
+        )
+        return total_progress // 3
+
+    def get_critical_components_status(self) -> Dict[str, str]:
+        """Get status of critical components (metadata + references)."""
+        return {"metadata": self.metadata.status, "references": self.references.status}
+
+
+class LegacyComponentStatus(BaseModel):
+    """Legacy simple component status for backward compatibility."""
 
     metadata: str = Field(default="pending", description="Status of metadata fetching")
     content: str = Field(
@@ -39,6 +117,45 @@ class TaskStatus(str, Enum):
     PROCESSING = "processing"
     SUCCESS = "success"
     FAILURE = "failure"
+
+
+class ComponentStage(str, Enum):
+    """Enumeration of detailed processing stages for each component."""
+
+    # Common stages
+    PENDING = "等待开始"
+    INITIALIZING = "正在初始化"
+    PROCESSING = "正在处理"
+    SUCCESS = "处理成功"
+    FAILED = "处理失败"
+    SKIPPED = "已跳过"
+    WAITING = "等待依赖"
+
+    # Metadata stages
+    METADATA_PENDING = "等待获取元数据"
+    METADATA_CROSSREF = "正在从CrossRef获取元数据"
+    METADATA_SEMANTIC = "正在从Semantic Scholar获取元数据"
+    METADATA_GROBID_FALLBACK = "使用GROBID作为元数据后备方案"
+    METADATA_SUCCESS = "元数据获取成功"
+    METADATA_FAILED = "元数据获取失败"
+
+    # Content stages
+    CONTENT_PENDING = "等待获取内容"
+    CONTENT_DOWNLOAD_USER = "正在下载用户提供的PDF"
+    CONTENT_DOWNLOAD_ARXIV = "正在下载ArXiv PDF"
+    CONTENT_DOWNLOAD_UNPAYWALL = "正在通过Unpaywall获取PDF"
+    CONTENT_PARSE_GROBID = "正在使用GROBID解析PDF"
+    CONTENT_SUCCESS = "内容获取成功"
+    CONTENT_SKIPPED = "内容获取已跳过"
+    CONTENT_FAILED = "内容获取失败"
+
+    # References stages
+    REFERENCES_PENDING = "等待获取参考文献"
+    REFERENCES_WAITING_CONTENT = "等待内容获取完成"
+    REFERENCES_API_SEMANTIC = "正在从Semantic Scholar获取参考文献"
+    REFERENCES_GROBID_PARSE = "正在使用GROBID解析参考文献"
+    REFERENCES_SUCCESS = "参考文献获取成功"
+    REFERENCES_FAILED = "参考文献获取失败"
 
 
 class TaskStage(str, Enum):
@@ -82,7 +199,7 @@ class TaskErrorInfo(BaseModel):
 
 
 class TaskStatusDTO(BaseModel):
-    """Data transfer object for task status queries."""
+    """Enhanced data transfer object for task status queries."""
 
     task_id: str = Field(..., description="The Celery task ID")
     status: str = Field(..., description="Overall status of the task")
@@ -91,14 +208,24 @@ class TaskStatusDTO(BaseModel):
         description="The result of the task, if completed.",
     )
 
-    # Granular status and progress
-    component_status: Optional[ComponentStatus] = Field(
+    # Enhanced granular status and progress
+    component_status: ComponentStatus = Field(
         default_factory=ComponentStatus,
-        description="Granular status of each processing component",
+        description="Enhanced granular status of each processing component",
+    )
+    overall_progress: int = Field(
+        default=0,
+        description="Overall processing progress (0-100)",
+        ge=0,
+        le=100,
+    )
+    current_stage: Optional[str] = Field(
+        None,
+        description="Current processing stage description",
     )
     details: Optional[Dict[str, Any]] = Field(
         None,
-        description="Detailed progress information, like current stage",
+        description="Additional detailed progress information",
     )
     literature_id: Optional[str] = Field(
         None,
@@ -108,25 +235,62 @@ class TaskStatusDTO(BaseModel):
         None,
         description="URL to access the literature (available when status is SUCCESS)",
     )
-    progress_percentage: Optional[int] = Field(
-        None,
-        description="Processing progress (0-100)",
-        ge=0,
-        le=100,
-    )
     error_info: Optional[TaskErrorInfo] = Field(
         None,
         description="Error details (available when status is FAILURE)",
     )
 
-    # Timestamps are optional as they might not be available for PENDING tasks
+    # Enhanced timestamps and progress tracking
     created_at: Optional[datetime] = Field(None, description="Task creation timestamp")
     updated_at: Optional[datetime] = Field(None, description="Last update timestamp")
-
     estimated_completion: Optional[datetime] = Field(
         None,
         description="Estimated completion time",
     )
+
+    # Dependency tracking
+    dependencies: Optional[Dict[str, bool]] = Field(
+        None,
+        description="Status of component dependencies",
+    )
+    next_actions: Optional[List[str]] = Field(
+        None,
+        description="List of next actions to be performed",
+    )
+
+    def model_post_init(self, __context: Any) -> None:
+        """Auto-calculate fields after model initialization."""
+        # Calculate overall progress from component status
+        if self.component_status:
+            self.overall_progress = self.component_status.get_overall_progress()
+
+        # Set current stage based on active component
+        if self.component_status:
+            active_stages = []
+            if self.component_status.metadata.status == "processing":
+                active_stages.append(self.component_status.metadata.stage)
+            if self.component_status.content.status == "processing":
+                active_stages.append(self.component_status.content.stage)
+            if self.component_status.references.status == "processing":
+                active_stages.append(self.component_status.references.stage)
+
+            if active_stages:
+                self.current_stage = "; ".join(active_stages)
+            elif self.status == "success":
+                self.current_stage = "处理完成"
+            elif self.status == "failed":
+                self.current_stage = "处理失败"
+
+        # Collect next actions
+        if self.component_status:
+            next_actions = []
+            if self.component_status.metadata.next_action:
+                next_actions.append(self.component_status.metadata.next_action)
+            if self.component_status.content.next_action:
+                next_actions.append(self.component_status.content.next_action)
+            if self.component_status.references.next_action:
+                next_actions.append(self.component_status.references.next_action)
+            self.next_actions = next_actions if next_actions else None
 
     class Config:
         json_schema_extra: ClassVar[Dict[str, Any]] = {

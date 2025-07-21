@@ -36,9 +36,14 @@ class IdentifiersModel(BaseModel):
 
     doi: Optional[str] = Field(default=None, description="Digital Object Identifier")
     arxiv_id: Optional[str] = Field(default=None, description="ArXiv identifier")
+    pmid: Optional[str] = Field(default=None, description="PubMed identifier")
     fingerprint: Optional[str] = Field(
         default=None,
         description="Content-based fingerprint",
+    )
+    source_urls: List[str] = Field(
+        default_factory=list,
+        description="List of source URLs for deduplication",
     )
 
     class Config:
