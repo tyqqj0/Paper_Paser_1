@@ -9,10 +9,10 @@ import logging
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
-import requests
-from requests.exceptions import RequestException, Timeout
+from requests.exceptions import RequestException
 
 from ..settings import Settings
+from .request_manager import ExternalRequestManager, RequestType
 
 logger = logging.getLogger(__name__)
 
@@ -36,12 +36,14 @@ class CrossRefClient:
         # User-Agent for polite pool access
         self.user_agent = f"LiteratureParser/1.0 (mailto:{self.mailto})"
 
-        # Common headers for all requests
-        self.headers = {"User-Agent": self.user_agent, "Accept": "application/json"}
+        # Use external request manager for all HTTP requests
+        self.request_manager = ExternalRequestManager(settings)
 
-        # Create a persistent session for connection pooling
-        self.session = requests.Session()
-        self.session.headers.update(self.headers)
+        # Set custom headers for CrossRef API
+        session = self.request_manager.get_session(RequestType.EXTERNAL)
+        session.headers.update(
+            {"User-Agent": self.user_agent, "Accept": "application/json"},
+        )
 
     def get_metadata_by_doi(self, doi: str) -> Optional[Dict[str, Any]]:
         """
@@ -71,7 +73,12 @@ class CrossRefClient:
         params = {"mailto": self.mailto}
 
         try:
-            response = self.session.get(url, params=params, timeout=self.timeout)
+            response = self.request_manager.get(
+                url=url,
+                request_type=RequestType.EXTERNAL,
+                params=params,
+                timeout=self.timeout,
+            )
 
             if response.status_code == 200:
                 data = response.json()
@@ -82,9 +89,6 @@ class CrossRefClient:
             else:
                 response.raise_for_status()  # Will raise an HTTPError for other bad statuses
 
-        except Timeout:
-            logger.error(f"CrossRef API timeout for DOI: {doi}")
-            raise Exception("CrossRef API request timed out")
         except RequestException as e:
             logger.error(f"CrossRef API error for DOI {doi}: {e}")
             raise Exception(f"CrossRef API request failed: {e!s}")
@@ -130,7 +134,12 @@ class CrossRefClient:
             params["filter"] = f"from-pub-date:{year},until-pub-date:{year}"
 
         try:
-            response = self.session.get(url, params=params, timeout=self.timeout)
+            response = self.request_manager.get(
+                url=url,
+                request_type=RequestType.EXTERNAL,
+                params=params,
+                timeout=self.timeout,
+            )
             response.raise_for_status()
 
             data = response.json()
@@ -291,7 +300,9 @@ class CrossRefClient:
         url = f"{self.base_url}/works/{encoded_doi}/agency"
 
         try:
-            response = self.session.get(url, timeout=self.timeout)
+            response = self.request_manager.get(
+                url=url, request_type=RequestType.EXTERNAL, timeout=self.timeout,
+            )
             if response.status_code == 200:
                 return response.json().get("message", {}).get("agency", {}).get("id")
             return None
@@ -308,7 +319,9 @@ class CrossRefClient:
         """
         url = f"{self.base_url}/types"
         try:
-            response = self.session.get(url, timeout=self.timeout)
+            response = self.request_manager.get(
+                url=url, request_type=RequestType.EXTERNAL, timeout=self.timeout,
+            )
             response.raise_for_status()
             return response.json().get("message", {}).get("items", [])
         except RequestException as e:

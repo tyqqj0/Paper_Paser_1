@@ -15,9 +15,14 @@ def get_app() -> FastAPI:
 
     :return: application.
     """
+    try:
+        version = metadata.version("literature_parser_backend")
+    except Exception:
+        version = "0.1.0"  # Fallback version for development
+
     app = FastAPI(
         title="literature_parser_backend",
-        version=metadata.version("literature_parser_backend"),
+        version=version,
         lifespan=lifespan_setup,
         docs_url="/api/docs",
         redoc_url="/api/redoc",

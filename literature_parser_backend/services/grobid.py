@@ -8,11 +8,11 @@ to extract metadata and fulltext from PDF documents.
 import logging
 from typing import Any, Dict, List, Optional
 
-import requests
 import xmltodict
 from requests.exceptions import RequestException, Timeout
 
 from ..settings import Settings
+from .request_manager import ExternalRequestManager, RequestType
 
 logger = logging.getLogger(__name__)
 
@@ -40,15 +40,11 @@ class GrobidClient:
             "version": "/api/version",
             "is_alive": "/api/isalive",
         }
-        # Configure session
-        self.session = requests.Session()
-        if self.settings.http_proxy or self.settings.https_proxy:
-            self.session.proxies = {
-                "http": self.settings.http_proxy,
-                "https": self.settings.https_proxy,
-            }
-        else:
-            self.session.proxies = {"http": "", "https": ""}
+        # Use internal request manager for GROBID (container-to-container communication)
+        self.request_manager = ExternalRequestManager(settings)
+
+        # Configure session (GROBID is internal service, no proxy needed)
+        self.session = self.request_manager.get_session(RequestType.INTERNAL)
 
     def health_check(self) -> bool:
         """
@@ -58,8 +54,9 @@ class GrobidClient:
             bool: True if service is healthy, False otherwise
         """
         try:
-            response = self.session.get(
-                f"{self.base_url}{self.endpoints['is_alive']}",
+            response = self.request_manager.get(
+                url=f"{self.base_url}{self.endpoints['is_alive']}",
+                request_type=RequestType.INTERNAL,
                 timeout=self.timeout,
             )
             return (
@@ -77,8 +74,9 @@ class GrobidClient:
             str: Version string if successful, None otherwise
         """
         try:
-            response = self.session.get(
-                f"{self.base_url}{self.endpoints['version']}",
+            response = self.request_manager.get(
+                url=f"{self.base_url}{self.endpoints['version']}",
+                request_type=RequestType.INTERNAL,
                 timeout=self.timeout,
             )
             if response.status_code == 200:
@@ -172,8 +170,9 @@ class GrobidClient:
 
         try:
             logger.info(f"GROBID_DEBUG: Sending POST request to {url}")
-            response = self.session.post(
-                url,
+            response = self.request_manager.post(
+                url=url,
+                request_type=RequestType.INTERNAL,
                 files=files,
                 data=form_data,
                 timeout=self.timeout,
@@ -232,8 +231,9 @@ class GrobidClient:
         url = f"{self.base_url}{self.endpoints['process_header']}"
 
         try:
-            response = self.session.post(
-                url,
+            response = self.request_manager.post(
+                url=url,
+                request_type=RequestType.INTERNAL,
                 files=files,
                 data=form_data,
                 timeout=self.timeout,

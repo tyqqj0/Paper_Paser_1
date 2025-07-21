@@ -91,8 +91,61 @@ class MetadataFetcher:
                         )
                     else:
                         logger.info("❌ No metadata found in Semantic Scholar")
+
+                        # Try extracting ArXiv ID from DOI if DOI lookup failed
+                        if id_type == "doi":
+                            extracted_arxiv_id = self._extract_arxiv_id_from_doi(
+                                identifier,
+                            )
+                            if extracted_arxiv_id:
+                                logger.info(
+                                    f"Extracted ArXiv ID {extracted_arxiv_id} from DOI, retrying...",
+                                )
+                                (
+                                    s2_metadata,
+                                    s2_raw_data,
+                                ) = self._fetch_from_semantic_scholar(
+                                    extracted_arxiv_id, "arxiv",
+                                )
+                                if s2_metadata:
+                                    metadata = s2_metadata
+                                    raw_data["semantic_scholar"] = s2_raw_data
+                                    source_priority.append(
+                                        "Semantic Scholar API (ArXiv ID extracted from DOI)",
+                                    )
+                                    logger.info(
+                                        "✅ Successfully fetched metadata using extracted ArXiv ID",
+                                    )
             except Exception as e:
                 logger.warning(f"Semantic Scholar lookup failed: {e}")
+
+                # Try extracting ArXiv ID from DOI if DOI lookup failed due to exception
+                if not metadata and identifiers.get("doi"):
+                    extracted_arxiv_id = self._extract_arxiv_id_from_doi(
+                        identifiers.get("doi"),
+                    )
+                    if extracted_arxiv_id:
+                        logger.info(
+                            f"Extracted ArXiv ID {extracted_arxiv_id} from DOI after exception, retrying...",
+                        )
+                        try:
+                            (
+                                s2_metadata,
+                                s2_raw_data,
+                            ) = self._fetch_from_semantic_scholar(
+                                extracted_arxiv_id, "arxiv",
+                            )
+                            if s2_metadata:
+                                metadata = s2_metadata
+                                raw_data["semantic_scholar"] = s2_raw_data
+                                source_priority.append(
+                                    "Semantic Scholar API (ArXiv ID extracted from DOI after exception)",
+                                )
+                                logger.info(
+                                    "✅ Successfully fetched metadata using extracted ArXiv ID after exception",
+                                )
+                        except Exception as e2:
+                            logger.warning(f"ArXiv ID retry also failed: {e2}")
 
         # 4. Fallback to GROBID if we have PDF content
         if not metadata and pdf_content:
@@ -209,6 +262,30 @@ class MetadataFetcher:
             abstract=s2_data.get("abstract"),
         )
         return metadata
+
+    def _extract_arxiv_id_from_doi(self, doi: str) -> Optional[str]:
+        """Extract ArXiv ID from DOI patterns like 10.48550/arXiv.1706.03762."""
+        import re
+
+        # Pattern 1: 10.48550/arXiv.XXXX.XXXXX
+        pattern1 = r"10\.48550/arXiv\.(\d{4}\.\d{4,5})"
+        match1 = re.search(pattern1, doi)
+        if match1:
+            return match1.group(1)
+
+        # Pattern 2: 10.48550/arXiv.XXXX.XXXXX vN (with version)
+        pattern2 = r"10\.48550/arXiv\.(\d{4}\.\d{4,5})v\d+"
+        match2 = re.search(pattern2, doi)
+        if match2:
+            return match2.group(1)
+
+        # Pattern 3: Direct arXiv in DOI like arxiv.org/abs/XXXX.XXXXX
+        pattern3 = r"arxiv\.org/abs/(\d{4}\.\d{4,5})"
+        match3 = re.search(pattern3, doi)
+        if match3:
+            return match3.group(1)
+
+        return None
 
     def _create_fallback_metadata(self, source_data: Dict[str, Any]) -> MetadataModel:
         """Create a fallback MetadataModel from the initial user-provided source."""

@@ -75,6 +75,44 @@ class ReferencesFetcher:
                     e,
                 )
 
+                # Try extracting ArXiv ID from DOI if DOI lookup failed due to exception
+                if not references and identifiers.get("doi"):
+                    extracted_arxiv_id = self._extract_arxiv_id_from_doi(
+                        identifiers.get("doi"),
+                    )
+                    if extracted_arxiv_id:
+                        logger.info(
+                            f"Extracted ArXiv ID {extracted_arxiv_id} from DOI for references, retrying...",
+                        )
+                        try:
+                            s2_refs = self.semantic_scholar_client.get_references(
+                                extracted_arxiv_id,
+                            )
+                            if s2_refs:
+                                raw_data["semantic_scholar"] = s2_refs
+                                for ref_data in s2_refs:
+                                    # Ensure 'title' is not None before creating the model
+                                    if ref_data.get("title"):
+                                        references.append(
+                                            ReferenceModel(
+                                                raw_text=ref_data.get(
+                                                    "raw_text",
+                                                    ref_data.get("title"),
+                                                ),
+                                                parsed=ref_data,
+                                                source="semantic_scholar",
+                                            ),
+                                        )
+                                logger.info(
+                                    f"✅ Successfully fetched {len(references)} references using extracted ArXiv ID.",
+                                )
+                                if references:
+                                    return references, raw_data
+                        except Exception as e2:
+                            logger.warning(
+                                f"ArXiv ID retry for references also failed: {e2}",
+                            )
+
         # 2. Fallback to GROBID if we have PDF content
         if not references and pdf_content:
             logger.info("Falling back to GROBID for reference extraction from PDF.")
@@ -102,3 +140,27 @@ class ReferencesFetcher:
                 logger.error(f"GROBID reference parsing failed: {e}", exc_info=True)
 
         return references, raw_data
+
+    def _extract_arxiv_id_from_doi(self, doi: str) -> Optional[str]:
+        """Extract ArXiv ID from DOI patterns like 10.48550/arXiv.1706.03762."""
+        import re
+
+        # Pattern 1: 10.48550/arXiv.XXXX.XXXXX
+        pattern1 = r"10\.48550/arXiv\.(\d{4}\.\d{4,5})"
+        match1 = re.search(pattern1, doi)
+        if match1:
+            return match1.group(1)
+
+        # Pattern 2: 10.48550/arXiv.XXXX.XXXXX vN (with version)
+        pattern2 = r"10\.48550/arXiv\.(\d{4}\.\d{4,5})v\d+"
+        match2 = re.search(pattern2, doi)
+        if match2:
+            return match2.group(1)
+
+        # Pattern 3: Direct arXiv in DOI like arxiv.org/abs/XXXX.XXXXX
+        pattern3 = r"arxiv\.org/abs/(\d{4}\.\d{4,5})"
+        match3 = re.search(pattern3, doi)
+        if match3:
+            return match3.group(1)
+
+        return None
