@@ -30,6 +30,7 @@
 | **任务队列**        | Celery                                   | 分布式任务队列，用于处理所有耗时的后台任务。              |
 | **消息中间人/缓存** | Redis                                    | 高性能内存数据库，用作Celery的Broker和应用层缓存。        |
 | **PDF解析服务**     | GROBID (v0.8.0+)                         | 独立的Java服务（通过Docker运行），提供顶级的PDF解析能力。 |
+| **对象存储**        | 腾讯云COS                                 | 云对象存储服务，用于高效、安全的文件上传和存储。          |
 | **项目起点**        | `tiangolo/full-stack-fastapi-postgresql` | 一个生产级的项目模板，我们将基于它进行开发和改造。        |
 
 -----
@@ -296,4 +297,236 @@ API响应慢：因为必须等待数据库查询完成，如果数据库慢，AP
 API响应极快：用户几乎可以瞬间得到响应，大大提升了用户体验。
 逻辑更健壮：所有复杂的、耗时的去重和处理逻辑，都交给了后台的Worker。即使去重需要下载PDF、调用GROBID，也不会阻塞API。这完美地实现了我们设计的先解析后去重的智能流程。
 简单来说，这次修改就是把“在门口拦人（同步去重）”的保安，变成了“先进来再登记（异步去重）”的流程管理员，整个系统变得更加高效和强大。
+
+-----
+
+## 9. 业务逻辑去重系统 (2025年重大更新)
+
+### 9.1. 设计理念
+
+系统采用**完全业务逻辑去重**的方案，移除了数据库层面的唯一约束，通过智能的瀑布流去重策略确保数据一致性。
+
+### 9.2. 核心特性
+
+- **异步处理**: API立即返回任务ID，所有去重逻辑在后台执行
+- **瀑布流策略**: 多层次、多维度的去重检查
+- **智能解析**: 先解析元数据，再进行内容去重
+- **并发安全**: 支持高并发提交，正确处理竞态条件
+
+### 9.3. 去重流程
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant API
+    participant Worker
+    participant GROBID
+    participant Database
+
+    User->>API: 提交请求 (DOI/URL/PDF)
+    API->>Worker: 立即创建任务 (不做同步去重)
+    API-->>User: 返回任务ID (202 Accepted)
+
+    Note right of Worker: 瀑布流去重开始
+    Worker->>Database: Phase 1: 显式标识符去重 (DOI, ArXiv ID)
+
+    alt 发现重复
+        Worker-->>API: 返回 SUCCESS_DUPLICATE
+    else 继续检查
+        Worker->>Database: Phase 2: 源URL去重
+        alt 发现重复
+            Worker-->>API: 返回 SUCCESS_DUPLICATE
+        else 继续检查
+            Worker->>Database: Phase 3: 处理状态检查 (防止并发)
+            alt 发现处理中
+                Worker-->>API: 返回 SUCCESS_DUPLICATE
+            else 继续检查
+                Worker->>GROBID: Phase 4: 解析PDF获取元数据
+                GROBID-->>Worker: 返回Title, Authors等
+                Worker->>Database: 内容指纹去重 (PDF MD5, 标题+作者)
+                alt 发现重复
+                    Worker-->>API: 返回 SUCCESS_DUPLICATE
+                else 创建新文献
+                    Worker->>Database: 保存新文献
+                    Worker-->>API: 返回 SUCCESS_CREATED
+                end
+            end
+        end
+    end
+```
+
+### 9.4. 实现结构
+
+| 组件 | 位置 | 功能 |
+|------|------|------|
+| **WaterfallDeduplicator** | `worker/deduplication.py` | 核心去重逻辑实现 |
+| **数据库索引** | MongoDB | 6个核心查询索引（无唯一约束） |
+| **API层** | `web/api/literature.py` | 异步任务创建 |
+| **Worker层** | `worker/tasks.py` | 去重流程编排 |
+
+### 9.5. 索引优化
+
+**移除前** (16个索引，3个唯一约束):
+```
+doi_unique_index: [UNIQUE] [PARTIAL]
+arxiv_unique_index: [UNIQUE] [PARTIAL]
+fingerprint_unique_index: [UNIQUE] [PARTIAL]
++ 13个其他索引
+```
+
+**优化后** (6个核心索引，0个唯一约束):
+```
+_id_: MongoDB默认主键索引
+doi_query_index: DOI查询索引 [PARTIAL]
+arxiv_query_index: ArXiv ID查询索引 [PARTIAL]
+fingerprint_query_index: 内容指纹查询索引 [PARTIAL]
+task_id_query_index: 任务ID查询索引
+title_text_search_index: 标题全文搜索索引
+```
+
+### 9.6. 使用方式
+
+```bash
+# 运行去重测试
+python3 test_business_logic_deduplication.py
+
+# 优化数据库索引
+python scripts/optimize_business_logic_indexes.py
+
+# 简化索引结构
+python scripts/simplify_index_structure.py
+```
+
+-----
+
+## 10. 腾讯云COS文件上传系统 (2025年新增)
+
+### 10.1. 设计理念
+
+采用**前端直传**的现代化文件上传方案，通过预签名URL实现安全、高效的文件上传。
+
+### 10.2. 核心特性
+
+- **前端直传**: 文件直接上传到COS，减少服务器负载
+- **预签名URL**: 临时、安全的上传凭证
+- **多层安全验证**: 文件名、大小、类型、内容验证
+- **智能下载**: 后端智能识别和下载COS文件
+
+### 10.3. 上传流程
+
+```mermaid
+sequenceDiagram
+    participant Frontend as 前端
+    participant Backend as 后端API
+    participant COS as 腾讯云COS
+    participant Worker as 后台Worker
+
+    Frontend->>Backend: POST /api/upload/request-url
+    Backend->>Backend: 安全验证 (文件名、大小、类型)
+    Backend->>COS: 生成预签名URL
+    Backend-->>Frontend: {uploadUrl, publicUrl}
+
+    Frontend->>COS: PUT 文件到预签名URL
+    COS-->>Frontend: 上传成功
+
+    Frontend->>Backend: POST /api/literature {pdf_url: publicUrl}
+    Backend->>Worker: 创建解析任务
+    Worker->>COS: 智能下载PDF (COS SDK + 回退机制)
+    Worker->>Worker: 解析和处理文献
+```
+
+### 10.4. 实现结构
+
+| 组件 | 位置 | 功能 |
+|------|------|------|
+| **COSService** | `services/cos.py` | COS操作核心服务 |
+| **SecurityValidator** | `services/security.py` | 安全验证服务 |
+| **UploadAPI** | `web/api/upload.py` | 文件上传API端点 |
+| **ContentFetcher** | `worker/content_fetcher.py` | 智能文件下载 |
+| **数据模型** | `models/upload.py` | 上传相关数据结构 |
+
+### 10.5. API端点
+
+| 端点 | 方法 | 功能 | 示例 |
+|------|------|------|------|
+| `/api/upload/request-url` | POST | 请求预签名上传URL | 生成临时上传凭证 |
+| `/api/upload/status` | GET | 查询文件上传状态 | 检查文件是否存在 |
+| `/api/upload/file` | DELETE | 删除上传的文件 | 清理无用文件 |
+
+### 10.6. 安全特性
+
+**文件验证**:
+- ✅ 文件名安全检查 (防路径遍历、危险字符)
+- ✅ 文件大小限制 (默认50MB)
+- ✅ MIME类型验证 (只允许PDF)
+- ✅ PDF内容验证 (魔数、结构检查)
+
+**URL安全**:
+- ✅ 预签名URL时间限制 (1小时过期)
+- ✅ 防SSRF攻击 (禁止私有IP)
+- ✅ 协议限制 (只允许HTTPS/HTTP)
+
+### 10.7. 配置要求
+
+```bash
+# 环境变量配置
+LITERATURE_PARSER_BACKEND_COS_SECRET_ID=your_secret_id
+LITERATURE_PARSER_BACKEND_COS_SECRET_KEY=your_secret_key
+LITERATURE_PARSER_BACKEND_COS_REGION=ap-shanghai
+LITERATURE_PARSER_BACKEND_COS_BUCKET=paperparser-1330571283
+LITERATURE_PARSER_BACKEND_COS_DOMAIN=paperparser-1330571283.cos.ap-shanghai.myqcloud.com
+```
+
+### 10.8. 使用示例
+
+**前端JavaScript**:
+```javascript
+// 1. 请求上传URL
+const response = await fetch('/api/upload/request-url', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    fileName: 'paper.pdf',
+    contentType: 'application/pdf',
+    fileSize: file.size
+  })
+});
+const { uploadUrl, publicUrl } = await response.json();
+
+// 2. 直接上传到COS
+await fetch(uploadUrl, {
+  method: 'PUT',
+  body: file,
+  headers: { 'Content-Type': 'application/pdf' }
+});
+
+// 3. 提交文献处理
+await fetch('/api/literature', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ pdf_url: publicUrl })
+});
+```
+
+**测试脚本**:
+```bash
+# 运行完整集成测试
+python3 test_cos_upload_integration.py
+```
+
+### 10.9. 性能优势
+
+- **🚀 上传性能**: 前端直传，无服务器中转
+- **💰 成本优化**: 减少服务器带宽消耗
+- **🔒 安全可靠**: 多层验证，防恶意上传
+- **🌐 高可用性**: 利用COS的CDN和高可用性
+- **🔧 易扩展**: 模块化设计，便于维护
+
+### 10.10. 存储桶配置
+
+**推荐配置**:
+- **访问权限**: 私有写，公有读
+- **CORS设置**: 允许前端域名的PUT请求
+- **生命周期**: 可选择性清理临时文件
+- **CDN加速**: 启用全球加速提升下载速度
 

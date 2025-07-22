@@ -78,6 +78,18 @@ class Settings(BaseSettings):
     celery_accept_content: list[str] = ["json"]
     celery_timezone: str = "UTC"
     celery_enable_utc: bool = True
+
+    # 腾讯云COS对象存储设置
+    cos_secret_id: str = ""  # 腾讯云SecretId
+    cos_secret_key: str = ""  # 腾讯云SecretKey
+    cos_region: str = "ap-shanghai"  # COS区域
+    cos_bucket: str = "paperparser-1330571283"  # COS存储桶名称
+    cos_domain: str = "paperparser-1330571283.cos.ap-shanghai.myqcloud.com"  # COS域名
+
+    # 文件上传设置
+    upload_max_file_size: int = 50 * 1024 * 1024  # 50MB
+    upload_allowed_extensions: list[str] = [".pdf"]  # 允许的文件扩展名
+    upload_presigned_url_expires: int = 3600  # 预签名URL过期时间(秒)，默认1小时
     celery_task_track_started: bool = True
     celery_task_time_limit: int = 30 * 60  # 30 minutes
     celery_task_soft_time_limit: int = 25 * 60  # 25 minutes

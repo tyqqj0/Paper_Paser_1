@@ -1,0 +1,103 @@
+{
+  "pass": 6,
+  "fail": 4,
+  "warn": 0,
+  "total": 10,
+  "results": [
+    {
+      "test_name": "请求上传URL",
+      "status": "PASS",
+      "timestamp": 1753170536.2644815,
+      "details": {
+        "message": "成功获取上传URL，对象键: uploads/test_user_123/2025/07/22/9001e24b-9c0d-4c71-902a-d3d991578930.pdf",
+        "object_key": "uploads/test_user_123/2025/07/22/9001e24b-9c0d-4c71-902a-d3d991578930.pdf",
+        "expires": 3600
+      }
+    },
+    {
+      "test_name": "上传文件到COS",
+      "status": "PASS",
+      "timestamp": 1753170536.6802444,
+      "details": {
+        "message": "成功上传文件到COS，大小: 10241 bytes",
+        "status_code": 200
+      }
+    },
+    {
+      "test_name": "检查上传状态",
+      "status": "PASS",
+      "timestamp": 1753170539.9134111,
+      "details": {
+        "message": "文件存在，大小: 10241 bytes",
+        "file_info": {
+          "objectKey": "uploads/test_user_123/2025/07/22/9001e24b-9c0d-4c71-902a-d3d991578930.pdf",
+          "exists": true,
+          "size": 10241,
+          "contentType": "application/pdf",
+          "lastModified": "Tue, 22 Jul 2025 07:48:56 GMT",
+          "publicUrl": "https://paperparser-1330571283.cos.ap-shanghai.myqcloud.com/uploads/test_user_123/2025/07/22/9001e24b-9c0d-4c71-902a-d3d991578930.pdf"
+        }
+      }
+    },
+    {
+      "test_name": "提交文献处理任务",
+      "status": "PASS",
+      "timestamp": 1753170540.2079396,
+      "details": {
+        "message": "成功提交任务: dc275ac3-2c40-4a04-b5c1-343413487654",
+        "task_id": "dc275ac3-2c40-4a04-b5c1-343413487654"
+      }
+    },
+    {
+      "test_name": "文献处理任务完成",
+      "status": "PASS",
+      "timestamp": 1753170543.2249396,
+      "details": {
+        "message": "任务完成，状态: success_created，文献ID: 687f426c1f92470809f5d2e7",
+        "task_id": "dc275ac3-2c40-4a04-b5c1-343413487654",
+        "literature_id": "687f426c1f92470809f5d2e7",
+        "status": "success_created"
+      }
+    },
+    {
+      "test_name": "安全验证-test.exe.pdf...",
+      "status": "FAIL",
+      "timestamp": 1753170543.2273066,
+      "details": {
+        "message": "未能拒绝危险文件名，状态码: 200"
+      }
+    },
+    {
+      "test_name": "安全验证-../../../etc/passwd....",
+      "status": "FAIL",
+      "timestamp": 1753170543.2290573,
+      "details": {
+        "message": "未能拒绝危险文件名，状态码: 422"
+      }
+    },
+    {
+      "test_name": "安全验证-CON.pdf...",
+      "status": "PASS",
+      "timestamp": 1753170543.2309299,
+      "details": {
+        "message": "正确拒绝危险文件名"
+      }
+    },
+    {
+      "test_name": "安全验证-test<script>.pdf...",
+      "status": "FAIL",
+      "timestamp": 1753170543.2327569,
+      "details": {
+        "message": "未能拒绝危险文件名，状态码: 422"
+      }
+    },
+    {
+      "test_name": "安全验证-aaaaaaaaaaaaaaaaaaaa...",
+      "status": "FAIL",
+      "timestamp": 1753170543.2346463,
+      "details": {
+        "message": "未能拒绝危险文件名，状态码: 422"
+      }
+    }
+  ]
+}
