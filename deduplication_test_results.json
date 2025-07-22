@@ -1,0 +1,49 @@
+{
+  "pass": 3,
+  "fail": 0,
+  "warn": 1,
+  "total": 4,
+  "results": [
+    {
+      "test_name": "DOI去重",
+      "status": "PASS",
+      "timestamp": 1753165858.0890226,
+      "details": {
+        "message": "成功检测到DOI重复",
+        "first_task": "6910acc9-be5b-4708-bc65-5905f75fcb8c",
+        "second_task": "e37cc8eb-1cae-4995-8a78-c2bb36ce00a1"
+      }
+    },
+    {
+      "test_name": "ArXiv去重",
+      "status": "PASS",
+      "timestamp": 1753165862.1169066,
+      "details": {
+        "message": "成功检测到ArXiv重复",
+        "first_task": "424c4459-a4cd-4b27-843a-4d03775459b0",
+        "second_task": "68a36537-c393-4f78-b441-5a21da0c4d35"
+      }
+    },
+    {
+      "test_name": "并发提交",
+      "status": "WARN",
+      "timestamp": 1753165862.4385452,
+      "details": {
+        "message": "并发处理结果: 0个创建, 3个重复, 0个失败",
+        "created": 0,
+        "duplicate": 3,
+        "failed": 0
+      }
+    },
+    {
+      "test_name": "跨标识符去重",
+      "status": "PASS",
+      "timestamp": 1753165866.4719865,
+      "details": {
+        "message": "成功检测到跨标识符重复 (DOI vs ArXiv)",
+        "doi_task": "020594f2-7a16-4ad1-97f6-42f82751bd3c",
+        "arxiv_task": "1f65bdc0-42ad-40b9-96cd-7ec6b843a833"
+      }
+    }
+  ]
+}

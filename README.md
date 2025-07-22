@@ -127,3 +127,68 @@ I prefer doing it with docker:
 ```bash
 pytest -vv .
 ```
+
+## 🆕 新功能特性 (2025年更新)
+
+### 🧠 业务逻辑去重系统
+
+采用完全业务逻辑去重的方案，移除数据库唯一约束，通过智能瀑布流策略确保数据一致性。
+
+**核心特性**:
+- ✅ 异步处理，API立即响应
+- ✅ 四阶段瀑布流去重策略
+- ✅ 支持高并发提交
+- ✅ 智能跨标识符去重
+
+**测试验证**:
+```bash
+# 运行去重功能测试
+python3 test_business_logic_deduplication.py
+
+# 优化数据库索引
+python scripts/optimize_business_logic_indexes.py
+```
+
+详细文档: [业务逻辑去重指南](BUSINESS_LOGIC_DEDUPLICATION_GUIDE.md)
+
+### 📁 腾讯云COS文件上传
+
+现代化的前端直传文件上传方案，通过预签名URL实现安全、高效的PDF上传。
+
+**核心特性**:
+- ✅ 前端直传，减少服务器负载
+- ✅ 预签名URL，安全可控
+- ✅ 多层安全验证
+- ✅ 智能文件下载和处理
+
+**API端点**:
+- `POST /api/upload/request-url` - 请求预签名上传URL
+- `GET /api/upload/status` - 查询文件上传状态
+- `DELETE /api/upload/file` - 删除上传的文件
+
+**测试验证**:
+```bash
+# 运行完整的上传集成测试
+python3 test_cos_upload_integration.py
+```
+
+详细文档: [COS上传API指南](COS_UPLOAD_API_GUIDE.md)
+
+### 🔧 配置要求
+
+在 `.env` 文件中添加以下配置:
+
+```bash
+# 腾讯云COS配置
+LITERATURE_PARSER_BACKEND_COS_SECRET_ID=your_secret_id
+LITERATURE_PARSER_BACKEND_COS_SECRET_KEY=your_secret_key
+LITERATURE_PARSER_BACKEND_COS_REGION=ap-shanghai
+LITERATURE_PARSER_BACKEND_COS_BUCKET=paperparser-1330571283
+LITERATURE_PARSER_BACKEND_COS_DOMAIN=paperparser-1330571283.cos.ap-shanghai.myqcloud.com
+```
+
+### 📚 完整文档
+
+- [项目结构详解](Project%20Structrue.md)
+- [业务逻辑去重指南](BUSINESS_LOGIC_DEDUPLICATION_GUIDE.md)
+- [COS上传API指南](COS_UPLOAD_API_GUIDE.md)

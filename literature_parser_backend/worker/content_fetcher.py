@@ -97,6 +97,11 @@ class ContentFetcher:
         """Download a PDF from a given URL."""
         try:
             logger.info(f"Attempting to download PDF from URL: {url}")
+
+            # 检查是否是COS URL，如果是则使用特殊处理
+            if self._is_cos_url(url):
+                return self._download_pdf_from_cos(url)
+
             from ..services.request_manager import RequestType
 
             response = self.request_manager.get(
@@ -352,3 +357,85 @@ class ContentFetcher:
         except Exception as e:
             logger.error(f"Error structuring GROBID content: {e}")
             return structured_content
+
+    def _is_cos_url(self, url: str) -> bool:
+        """检查URL是否是腾讯云COS URL"""
+        cos_domains = [
+            self.settings.cos_domain,
+            "cos.ap-shanghai.myqcloud.com",
+            "cos.myqcloud.com"
+        ]
+        return any(domain in url for domain in cos_domains)
+
+    def _download_pdf_from_cos(self, url: str) -> Optional[bytes]:
+        """从腾讯云COS下载PDF文件"""
+        try:
+            logger.info(f"从COS下载PDF: {url}")
+
+            # 对于COS公开读的文件，可以直接使用HTTP请求
+            # 但为了更好的错误处理和认证，我们使用COS服务
+            from ..services.cos import get_cos_service, extract_object_key_from_url
+
+            # 提取对象键名
+            object_key = extract_object_key_from_url(url, self.settings.cos_domain)
+            if not object_key:
+                logger.warning(f"无法从COS URL提取对象键名: {url}")
+                # 回退到普通HTTP下载
+                return self._download_pdf_fallback(url)
+
+            # 获取COS服务
+            cos_service = get_cos_service()
+
+            # 检查文件是否存在
+            if not cos_service.check_object_exists(object_key):
+                logger.warning(f"COS文件不存在: {object_key}")
+                return None
+
+            # 生成下载URL（带认证）
+            download_url = cos_service.generate_download_url(object_key, expires=3600)
+
+            # 使用下载URL获取文件
+            from ..services.request_manager import RequestType
+            response = self.request_manager.get(
+                url=download_url,
+                request_type=RequestType.EXTERNAL,
+                timeout=self.timeout
+            )
+            response.raise_for_status()
+
+            logger.info(f"成功从COS下载PDF: {len(response.content)} bytes")
+
+            # 验证PDF格式
+            if not response.content.startswith(b"%PDF-"):
+                logger.warning("从COS下载的文件不是有效的PDF格式")
+                return None
+
+            return response.content
+
+        except Exception as e:
+            logger.error(f"从COS下载PDF失败: {e}")
+            # 回退到普通HTTP下载
+            logger.info("尝试回退到普通HTTP下载...")
+            return self._download_pdf_fallback(url)
+
+    def _download_pdf_fallback(self, url: str) -> Optional[bytes]:
+        """回退的PDF下载方法（普通HTTP请求）"""
+        try:
+            from ..services.request_manager import RequestType
+            response = self.request_manager.get(
+                url=url,
+                request_type=RequestType.EXTERNAL,
+                timeout=self.timeout
+            )
+            response.raise_for_status()
+
+            if response.content.startswith(b"%PDF-"):
+                logger.info(f"回退下载成功: {len(response.content)} bytes")
+                return response.content
+            else:
+                logger.warning("回退下载的文件不是有效的PDF格式")
+                return None
+
+        except Exception as e:
+            logger.error(f"回退下载也失败: {e}")
+            return None
