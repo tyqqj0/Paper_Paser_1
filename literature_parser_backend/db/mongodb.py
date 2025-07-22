@@ -107,42 +107,42 @@ async def create_indexes() -> None:
     """Create necessary indexes for better query performance."""
     try:
         collection = literature_collection()
-        logger.info("Dropping old indexes...")
-        try:
-            await collection.drop_index("doi_index")
-            logger.info("Dropped 'doi_index'.")
-        except Exception:
-            logger.warning("'doi_index' not found, skipping.")
-        try:
-            await collection.drop_index("arxiv_id_index")
-            logger.info("Dropped 'arxiv_id_index'.")
-        except Exception:
-            logger.warning("'arxiv_id_index' not found, skipping.")
+        logger.info("Cleaning up old indexes...")
 
-        logger.info("Creating new smart indexes...")
+        # 清理旧的索引
+        old_indexes = [
+            "doi_index", "arxiv_id_index",
+            "doi_unique_index", "arxiv_unique_index", "fingerprint_unique_index"
+        ]
 
-        # 唯一索引：只对非null值生效，避免重复键错误
+        for index_name in old_indexes:
+            try:
+                await collection.drop_index(index_name)
+                logger.info(f"Dropped '{index_name}'.")
+            except Exception:
+                logger.warning(f"'{index_name}' not found, skipping.")
+
+        logger.info("Creating optimized query indexes...")
+
+        # 查询性能索引：不使用唯一约束，依赖业务逻辑去重
         await collection.create_index(
             [("identifiers.doi", 1)],
-            name="doi_unique_index",
-            unique=True,
+            name="doi_query_index",
             partialFilterExpression={"identifiers.doi": {"$type": "string"}},
             background=True,
         )
         await collection.create_index(
             [("identifiers.arxiv_id", 1)],
-            name="arxiv_unique_index",
-            unique=True,
+            name="arxiv_query_index",
             partialFilterExpression={"identifiers.arxiv_id": {"$type": "string"}},
             background=True,
         )
 
-        # 内容指纹唯一索引
+        # 内容指纹查询索引
         await collection.create_index(
             [("identifiers.fingerprint", 1)],
-            name="fingerprint_unique_index",
-            unique=True,
-            sparse=True,  # 忽略没有该字段的文档
+            name="fingerprint_query_index",
+            partialFilterExpression={"identifiers.fingerprint": {"$type": "string"}},
             background=True,
         )
 
@@ -274,30 +274,27 @@ async def create_task_indexes(
         collection = get_task_collection(database)
 
         # Only create essential indexes for task operations
-        logger.info("Creating essential indexes for task...")
+        logger.info("Creating essential query indexes for task...")
 
-        # 唯一索引：只对非null值生效，避免重复键错误
+        # 查询性能索引：不使用唯一约束，依赖业务逻辑去重
         await collection.create_index(
             [("identifiers.doi", 1)],
-            name="doi_unique_index",
-            unique=True,
+            name="doi_query_index",
             partialFilterExpression={"identifiers.doi": {"$type": "string"}},
             background=True,
         )
         await collection.create_index(
             [("identifiers.arxiv_id", 1)],
-            name="arxiv_unique_index",
-            unique=True,
+            name="arxiv_query_index",
             partialFilterExpression={"identifiers.arxiv_id": {"$type": "string"}},
             background=True,
         )
 
-        # 内容指纹唯一索引
+        # 内容指纹查询索引
         await collection.create_index(
             [("identifiers.fingerprint", 1)],
-            name="fingerprint_unique_index",
-            unique=True,
-            sparse=True,  # 忽略没有该字段的文档
+            name="fingerprint_query_index",
+            partialFilterExpression={"identifiers.fingerprint": {"$type": "string"}},
             background=True,
         )
 

@@ -28,16 +28,15 @@ class UploadRequestDTO(BaseModel):
     @validator('fileName')
     def validate_filename(cls, v):
         """验证文件名"""
-        # 检查文件名是否包含非法字符
-        illegal_chars = ['<', '>', ':', '"', '|', '?', '*', '\\', '/']
-        for char in illegal_chars:
-            if char in v:
-                raise ValueError(f"文件名包含非法字符: {char}")
-        
-        # 检查文件扩展名
-        if not v.lower().endswith('.pdf'):
-            raise ValueError("只支持PDF文件")
-        
+        from ..services.security import get_security_validator
+
+        # 使用安全验证器进行全面检查
+        security_validator = get_security_validator()
+        is_valid, error_msg = security_validator.validate_filename(v)
+
+        if not is_valid:
+            raise ValueError(error_msg)
+
         return v
     
     @validator('contentType')
