@@ -6,8 +6,10 @@
 """
 
 from typing import Optional
-from fastapi import APIRouter, HTTPException, status, Query
+from fastapi import APIRouter, HTTPException, status, Query, Request
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 from loguru import logger
 
 from literature_parser_backend.models.upload import (
@@ -26,6 +28,9 @@ router = APIRouter(prefix="/upload", tags=["文件上传"])
 settings = Settings()
 
 
+
+
+
 @router.post(
     "/request-url",
     response_model=UploadResponseDTO,
@@ -33,47 +38,71 @@ settings = Settings()
     description="生成用于前端直传到COS的预签名URL和公开访问URL",
     status_code=status.HTTP_200_OK,
 )
-async def request_upload_url(upload_request: UploadRequestDTO) -> UploadResponseDTO:
+async def request_upload_url(request: Request) -> UploadResponseDTO:
     """
     请求文件上传预签名URL
-    
+
     前端使用此接口获取预签名URL，然后直接上传文件到COS。
-    
+
     Args:
-        upload_request: 上传请求参数
-        
+        request: HTTP请求对象
+
     Returns:
         包含预签名URL和公开URL的响应
-        
+
     Raises:
         HTTPException: 当参数验证失败或生成URL失败时
     """
     try:
-        logger.info(f"收到上传URL请求: {upload_request.fileName}, 大小: {upload_request.fileSize}")
+        # 手动解析JSON数据
+        request_data = await request.json()
+
+        # 手动验证必需字段
+        if "fileName" not in request_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error": "ValidationError",
+                    "message": "fileName字段是必需的"
+                }
+            )
+
+        filename = request_data["fileName"]
+        content_type = request_data.get("contentType", "application/pdf")
+        file_size = request_data.get("fileSize")
+        user_id = request_data.get("userId")
+
+        logger.info("收到上传URL请求: {}, 大小: {}", filename, file_size)
 
         # 安全验证
         security_validator = get_security_validator()
         is_valid, errors = security_validator.validate_upload_request(
-            filename=upload_request.fileName,
-            mime_type=upload_request.contentType,
-            file_size=upload_request.fileSize
+            filename=filename,
+            mime_type=content_type,
+            file_size=file_size
         )
 
         if not is_valid:
-            logger.warning(f"上传请求安全验证失败: {errors}")
-            raise ValueError("; ".join(errors))
+            logger.warning("上传请求安全验证失败: {}", errors)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error": "SecurityValidationError",
+                    "message": "; ".join(errors)
+                }
+            )
 
         # 获取COS服务实例
         cos_service = get_cos_service()
-        
+
         # 生成预签名URL
         result = cos_service.generate_presigned_upload_url(
-            filename=upload_request.fileName,
-            content_type=upload_request.contentType,
-            user_id=upload_request.userId,
-            file_size=upload_request.fileSize
+            filename=filename,
+            content_type=content_type,
+            user_id=user_id,
+            file_size=file_size
         )
-        
+
         # 构建响应
         response = UploadResponseDTO(
             uploadUrl=result["uploadUrl"],
@@ -82,12 +111,12 @@ async def request_upload_url(upload_request: UploadRequestDTO) -> UploadResponse
             expires=result["expires"],
             maxFileSize=settings.upload_max_file_size
         )
-        
-        logger.info(f"生成上传URL成功: {result['objectKey']}")
+
+        logger.info("生成上传URL成功: {}", result['objectKey'])
         return response
         
     except ValueError as e:
-        logger.warning(f"上传请求参数错误: {e}")
+        logger.warning("上传请求参数错误: {}", str(e))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
@@ -95,8 +124,11 @@ async def request_upload_url(upload_request: UploadRequestDTO) -> UploadResponse
                 "message": str(e)
             }
         )
+    except HTTPException:
+        # 重新抛出HTTP异常，不要被通用异常处理器捕获
+        raise
     except RuntimeError as e:
-        logger.error(f"生成上传URL失败: {e}")
+        logger.error("生成上传URL失败: {}", str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
@@ -105,7 +137,7 @@ async def request_upload_url(upload_request: UploadRequestDTO) -> UploadResponse
             }
         )
     except Exception as e:
-        logger.error(f"未知错误: {e}", exc_info=True)
+        logger.error("未知错误: {}", str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
@@ -176,7 +208,7 @@ async def check_upload_status(
         # 生成公开URL（如果没有提供）
         if not public_url:
             from urllib.parse import quote
-            public_url = f"https://{settings.cos_domain}/{quote(object_key)}"
+            public_url = "https://" + settings.cos_domain + "/" + quote(object_key)
         
         # 构建响应
         response = UploadStatusDTO(
@@ -188,13 +220,13 @@ async def check_upload_status(
             publicUrl=public_url
         )
         
-        logger.info(f"查询文件状态: {object_key}, 存在: {exists}")
+        logger.info("查询文件状态: {}, 存在: {}", object_key, exists)
         return response
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"查询文件状态失败: {e}", exc_info=True)
+        logger.error("查询文件状态失败: {}", str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
@@ -271,7 +303,7 @@ async def delete_uploaded_file(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"删除文件失败: {e}", exc_info=True)
+        logger.error("删除文件失败: {}", str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={

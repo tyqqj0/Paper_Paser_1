@@ -85,7 +85,7 @@ services:
     environment:
       JAVA_OPTS: "-Xmx2g"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8070/api/isalive"]
+      test: ["CMD", "timeout", "5", "bash", "-c", "</dev/tcp/localhost/8070"]
       interval: 30s
       timeout: 10s
       retries: 5

@@ -36,8 +36,12 @@ class SecurityValidator:
     DANGEROUS_FILENAME_PATTERNS = [
         r'^\.',  # 隐藏文件
         r'^\s*$',  # 空白文件名
+        r'.*\.(exe|bat|cmd|com|pif|scr|vbs|js|jar|sh|php|asp|aspx|jsp|py|pl|rb|ps1)\.pdf$',  # 双扩展名
         r'.*\.(exe|bat|cmd|com|pif|scr|vbs|js|jar|sh|php|asp|aspx|jsp|py|pl|rb|ps1)$',  # 危险扩展名
         r'^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)',  # Windows保留名称
+        r'.*\.\.',  # 路径遍历
+        r'.*/.*',  # 路径分隔符
+        r'.*\\.*',  # Windows路径分隔符
     ]
     
     def __init__(self, max_file_size: int = 50 * 1024 * 1024):
@@ -74,7 +78,15 @@ class SecurityValidator:
         # 检查危险模式
         for pattern in self.DANGEROUS_FILENAME_PATTERNS:
             if re.match(pattern, filename, re.IGNORECASE):
-                return False, f"文件名匹配危险模式: {pattern}"
+                return False, f"文件名包含危险模式"
+
+        # 额外检查：双扩展名
+        if filename.lower().count('.') > 1:
+            parts = filename.lower().split('.')
+            if len(parts) >= 3:  # 至少有两个扩展名
+                second_ext = parts[-2]
+                if second_ext in ['exe', 'bat', 'cmd', 'com', 'pif', 'scr', 'vbs', 'js', 'jar', 'sh', 'php', 'asp', 'aspx', 'jsp', 'py', 'pl', 'rb', 'ps1']:
+                    return False, f"检测到危险的双扩展名: .{second_ext}.pdf"
         
         # 检查文件扩展名
         _, ext = os.path.splitext(filename.lower())
