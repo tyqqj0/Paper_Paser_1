@@ -45,7 +45,7 @@ def check_task_status(task_id):
             response = requests.get(url)
             response.raise_for_status()
             status_data = response.json()
-            current_status = status_data.get("status", "UNKNOWN").lower()
+            current_status = status_data.get("status", "unknown")
 
             # Make the details extraction more robust
             details_info = status_data.get("details") or {}
@@ -54,10 +54,8 @@ def check_task_status(task_id):
             print(f"当前状态: {current_status} - {details}")
 
             if current_status in [
-                "success",
-                "success_duplicate",
-                "success_created",
-                "failure",
+                "completed",
+                "failed",
             ]:
                 print("✅ 任务处理完成")
                 return status_data

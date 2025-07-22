@@ -283,10 +283,11 @@ startxref
                     data = response.json()
                     status = data.get("status", "unknown")
                     
-                    if status in ["success_created", "success_duplicate"]:
+                    if status == "completed":
                         literature_id = data.get("literature_id")
+                        result_type = data.get("result_type", "unknown")
                         self.log_test("文献处理任务完成", "PASS", {
-                            "message": f"任务完成，状态: {status}，文献ID: {literature_id}",
+                            "message": f"任务完成，状态: {status}_{result_type}，文献ID: {literature_id}",
                             "task_id": task_id,
                             "literature_id": literature_id,
                             "status": status

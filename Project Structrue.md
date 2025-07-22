@@ -530,3 +530,18 @@ python3 test_cos_upload_integration.py
 - **生命周期**: 可选择性清理临时文件
 - **CDN加速**: 启用全球加速提升下载速度
 
+
+
+{
+  "task_id": "a4a35dbe-6eb0-4762-91a4-b022eaec5aa0",
+  "status": "success",
+  "result_type": "created",
+  "literature_id": "687f7984bfb38497ebaa77d7",
+  "component_status": {
+    "metadata": {"status": "success", "stage": "元数据获取成功"},
+    "content": {"status": "success", "stage": "内容获取成功"},
+    "references": {"status": "success", "stage": "参考文献获取成功"}
+  },
+  "overall_progress": 100,
+  "current_stage": "处理完成"
+}

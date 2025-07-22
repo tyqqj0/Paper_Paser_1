@@ -16,37 +16,56 @@ from pydantic import BaseModel, Field
 # ===============================
 
 
-class EnhancedComponentStatus(BaseModel):
-    """Enhanced status tracking for a single component with detailed information."""
+class ComponentStatus(str, Enum):
+    """组件状态枚举"""
+    PENDING = "pending"           # 等待开始
+    PROCESSING = "processing"     # 正在处理
+    SUCCESS = "success"          # 处理成功
+    FAILED = "failed"            # 处理失败
+    SKIPPED = "skipped"          # 已跳过
+    WAITING = "waiting"          # 等待依赖
 
-    status: str = Field(
-        default="pending",
-        description="Component status (pending/processing/success/failed/waiting/skipped)",
+
+class ComponentDetail(BaseModel):
+    """单个组件的详细状态信息"""
+
+    status: ComponentStatus = Field(
+        default=ComponentStatus.PENDING,
+        description="组件状态"
     )
-    stage: str = Field(default="等待开始", description="Detailed stage description")
+    stage: str = Field(
+        default="等待开始",
+        description="详细阶段描述，如'正在从CrossRef获取元数据'"
+    )
     progress: int = Field(
-        default=0, description="Progress percentage (0-100)", ge=0, le=100,
-    )
-    error_info: Optional[Dict[str, Any]] = Field(
-        None, description="Error details if failed",
+        default=0,
+        description="进度百分比 0-100",
+        ge=0, le=100
     )
     started_at: Optional[datetime] = Field(
-        None, description="When component processing started",
+        None,
+        description="组件开始处理时间"
     )
     completed_at: Optional[datetime] = Field(
-        None, description="When component processing completed",
+        None,
+        description="组件完成处理时间"
     )
-    dependencies_met: bool = Field(
-        default=True, description="Whether dependencies are satisfied",
-    )
-    next_action: Optional[str] = Field(
-        None, description="Description of next action to be taken",
+    error_info: Optional[Dict[str, Any]] = Field(
+        None,
+        description="错误详情（如果失败）"
     )
     source: Optional[str] = Field(
-        None, description="Data source that succeeded (e.g., 'CrossRef API')",
+        None,
+        description="数据来源，如'CrossRef', 'Semantic Scholar'"
     )
-    attempts: int = Field(default=0, description="Number of attempts made")
-    max_attempts: int = Field(default=3, description="Maximum attempts allowed")
+    attempts: int = Field(
+        default=0,
+        description="尝试次数"
+    )
+    max_attempts: int = Field(
+        default=3,
+        description="最大尝试次数"
+    )
 
     class Config:
         json_schema_extra: ClassVar[Dict[str, Any]] = {
@@ -66,24 +85,24 @@ class EnhancedComponentStatus(BaseModel):
         }
 
 
-class ComponentStatus(BaseModel):
-    """Enhanced component status tracking with detailed information for each component."""
+class LiteratureComponentStatus(BaseModel):
+    """文献各组件的详细状态跟踪"""
 
-    metadata: EnhancedComponentStatus = Field(
-        default_factory=EnhancedComponentStatus,
-        description="Enhanced metadata fetching status",
+    metadata: ComponentDetail = Field(
+        default_factory=ComponentDetail,
+        description="元数据获取状态"
     )
-    content: EnhancedComponentStatus = Field(
-        default_factory=EnhancedComponentStatus,
-        description="Enhanced content fetching and parsing status",
+    content: ComponentDetail = Field(
+        default_factory=ComponentDetail,
+        description="内容获取和解析状态"
     )
-    references: EnhancedComponentStatus = Field(
-        default_factory=EnhancedComponentStatus,
-        description="Enhanced references fetching status",
+    references: ComponentDetail = Field(
+        default_factory=ComponentDetail,
+        description="参考文献获取状态"
     )
 
     def get_overall_progress(self) -> int:
-        """Calculate overall progress as average of all components."""
+        """计算整体进度（三个组件的平均值）"""
         total_progress = (
             self.metadata.progress + self.content.progress + self.references.progress
         )
@@ -94,29 +113,41 @@ class ComponentStatus(BaseModel):
         return {"metadata": self.metadata.status, "references": self.references.status}
 
 
-class LegacyComponentStatus(BaseModel):
-    """Legacy simple component status for backward compatibility."""
+class LiteratureProcessingStatus(BaseModel):
+    """文献处理的完整状态信息"""
 
-    metadata: str = Field(default="pending", description="Status of metadata fetching")
-    content: str = Field(
-        default="pending",
-        description="Status of content fetching and parsing",
-    )
-    references: str = Field(
-        default="pending",
-        description="Status of references fetching",
+    literature_id: str = Field(..., description="文献ID")
+    overall_status: str = Field(..., description="整体状态: processing/completed/failed")
+    overall_progress: int = Field(
+        default=0,
+        description="整体进度 0-100",
+        ge=0, le=100
     )
 
+    # 使用组合而不是重复字段
+    component_status: LiteratureComponentStatus = Field(
+        default_factory=LiteratureComponentStatus,
+        description="各组件的详细状态"
+    )
 
-class TaskStatus(str, Enum):
-    """Enum for the overall status of a task."""
+    # 时间信息
+    created_at: datetime = Field(..., description="创建时间")
+    updated_at: datetime = Field(..., description="更新时间")
 
-    """Enumeration of possible task statuses."""
 
-    PENDING = "pending"
-    PROCESSING = "processing"
-    SUCCESS = "success"
-    FAILURE = "failure"
+class TaskExecutionStatus(str, Enum):
+    """任务执行状态 - 用于前端轮询控制"""
+    PENDING = "pending"        # 任务等待执行 - 继续轮询
+    PROCESSING = "processing"  # 任务正在执行 - 继续轮询
+    COMPLETED = "completed"    # 任务执行完成 - 停止轮询
+    FAILED = "failed"         # 任务执行失败 - 停止轮询
+
+
+class TaskResultType(str, Enum):
+    """任务结果类型 - 用于结果类型标识和调试"""
+    CREATED = "created"       # 创建了新文献
+    DUPLICATE = "duplicate"   # 发现重复文献
+
 
 
 class ComponentStage(str, Enum):
@@ -199,147 +230,59 @@ class TaskErrorInfo(BaseModel):
 
 
 class TaskStatusDTO(BaseModel):
-    """Enhanced data transfer object for task status queries."""
+    """统一的任务状态响应模型"""
 
-    task_id: str = Field(..., description="The Celery task ID")
-    status: str = Field(..., description="Overall status of the task")
-    result: Optional[Any] = Field(
+    # 任务信息（轮询控制用）
+    task_id: str = Field(..., description="Celery任务ID")
+    execution_status: TaskExecutionStatus = Field(..., description="任务执行状态")
+    result_type: Optional[TaskResultType] = Field(
         None,
-        description="The result of the task, if completed.",
+        description="任务结果类型"
     )
 
-    # Enhanced granular status and progress
-    component_status: ComponentStatus = Field(
-        default_factory=ComponentStatus,
-        description="Enhanced granular status of each processing component",
+    # 文献信息（详细展示用）
+    literature_id: Optional[str] = Field(
+        None,
+        description="关联的文献ID"
     )
+    literature_status: Optional[LiteratureProcessingStatus] = Field(
+        None,
+        description="文献处理的详细状态"
+    )
+
+    # 向后兼容字段（映射到execution_status）
+    status: str = Field(..., description="任务状态（兼容性字段）")
+
+    # 简化的进度信息（从literature_status聚合）
     overall_progress: int = Field(
         default=0,
-        description="Overall processing progress (0-100)",
-        ge=0,
-        le=100,
+        description="整体进度",
+        ge=0, le=100
     )
     current_stage: Optional[str] = Field(
         None,
-        description="Current processing stage description",
+        description="当前阶段描述"
     )
+
+    # 错误信息
+    error_info: Optional[TaskErrorInfo] = Field(
+        None,
+        description="错误详情"
+    )
+
+    # 兼容性字段
     details: Optional[Dict[str, Any]] = Field(
         None,
-        description="Additional detailed progress information",
-    )
-    literature_id: Optional[str] = Field(
-        None,
-        description="Literature ID (available when processing starts or completes)",
+        description="额外详情信息"
     )
     resource_url: Optional[str] = Field(
         None,
-        description="URL to access the literature (available when status is SUCCESS)",
-    )
-    error_info: Optional[TaskErrorInfo] = Field(
-        None,
-        description="Error details (available when status is FAILURE)",
+        description="文献访问URL"
     )
 
-    # Enhanced timestamps and progress tracking
-    created_at: Optional[datetime] = Field(None, description="Task creation timestamp")
-    updated_at: Optional[datetime] = Field(None, description="Last update timestamp")
-    estimated_completion: Optional[datetime] = Field(
-        None,
-        description="Estimated completion time",
-    )
 
-    # Dependency tracking
-    dependencies: Optional[Dict[str, bool]] = Field(
-        None,
-        description="Status of component dependencies",
-    )
-    next_actions: Optional[List[str]] = Field(
-        None,
-        description="List of next actions to be performed",
-    )
 
-    def model_post_init(self, __context: Any) -> None:
-        """Auto-calculate fields after model initialization."""
-        # Calculate overall progress from component status
-        if self.component_status:
-            self.overall_progress = self.component_status.get_overall_progress()
 
-        # Set current stage based on active component
-        if self.component_status:
-            active_stages = []
-            if self.component_status.metadata.status == "processing":
-                active_stages.append(self.component_status.metadata.stage)
-            if self.component_status.content.status == "processing":
-                active_stages.append(self.component_status.content.stage)
-            if self.component_status.references.status == "processing":
-                active_stages.append(self.component_status.references.stage)
-
-            if active_stages:
-                self.current_stage = "; ".join(active_stages)
-            elif self.status == "success":
-                self.current_stage = "处理完成"
-            elif self.status == "failed":
-                self.current_stage = "处理失败"
-
-        # Collect next actions
-        if self.component_status:
-            next_actions = []
-            if self.component_status.metadata.next_action:
-                next_actions.append(self.component_status.metadata.next_action)
-            if self.component_status.content.next_action:
-                next_actions.append(self.component_status.content.next_action)
-            if self.component_status.references.next_action:
-                next_actions.append(self.component_status.references.next_action)
-            self.next_actions = next_actions if next_actions else None
-
-    class Config:
-        json_schema_extra: ClassVar[Dict[str, Any]] = {
-            "examples": [
-                {
-                    "task_id": "a1b2-c3d4-e5f6-g7h8",
-                    "status": "processing",
-                    "stage": "正在从 CrossRef 获取元数据",
-                    "literature_id": None,
-                    "resource_url": None,
-                    "progress_percentage": 30,
-                    "error_info": None,
-                    "created_at": "2024-01-15T10:30:00Z",
-                    "updated_at": "2024-01-15T10:31:30Z",
-                    "estimated_completion": "2024-01-15T10:35:00Z",
-                },
-                {
-                    "task_id": "a1b2-c3d4-e5f6-g7h8",
-                    "status": "success",
-                    "stage": "解析完成",
-                    "literature_id": "lit_abc123",
-                    "resource_url": "/api/v1/literatures/lit_abc123",
-                    "progress_percentage": 100,
-                    "error_info": None,
-                    "created_at": "2024-01-15T10:30:00Z",
-                    "updated_at": "2024-01-15T10:34:45Z",
-                    "estimated_completion": None,
-                },
-                {
-                    "task_id": "a1b2-c3d4-e5f6-g7h8",
-                    "status": "failure",
-                    "stage": "处理出错",
-                    "literature_id": None,
-                    "resource_url": None,
-                    "progress_percentage": 60,
-                    "error_info": {
-                        "error_type": "PDFParsingError",
-                        "error_message": "PDF 文件损坏或无法解析",
-                        "error_details": {
-                            "pdf_url": "https://example.com/broken.pdf",
-                            "grobid_error": "Parsing failed after 3 attempts",
-                        },
-                    },
-                    "created_at": "2024-01-15T10:30:00Z",
-                    "updated_at": "2024-01-15T10:33:15Z",
-                    "estimated_completion": None,
-                },
-            ],
-        }
 
 
 # Internal models for task management (not exposed via API)
@@ -349,20 +292,19 @@ class TaskProgressUpdate(BaseModel):
     """Internal model for updating task progress from workers."""
 
     task_id: str
-    status: TaskStatus
-    stage: Optional[TaskStage] = None
-    progress_percentage: Optional[int] = None
+    execution_status: TaskExecutionStatus
+    current_stage: Optional[str] = None
+    progress: Optional[int] = None
     literature_id: Optional[str] = None
     error_info: Optional[TaskErrorInfo] = None
-    estimated_completion: Optional[datetime] = None
 
 
 class TaskResult(BaseModel):
     """Internal model for task completion results."""
 
     task_id: str
-    success: bool
+    execution_status: TaskExecutionStatus
+    result_type: Optional[TaskResultType] = None
     literature_id: Optional[str] = None
     error_info: Optional[TaskErrorInfo] = None
     processing_time_seconds: Optional[float] = None
-    stages_completed: list[TaskStage] = Field(default_factory=list)

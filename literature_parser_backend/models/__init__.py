@@ -21,7 +21,7 @@ from .literature import (
     ReferenceModel,
     TaskInfoModel,
 )
-from .task import TaskStatus, TaskStatusDTO
+from .task import TaskExecutionStatus, TaskStatusDTO, TaskResultType
 
 __all__ = [
     "LiteratureModel",
@@ -35,7 +35,8 @@ __all__ = [
     "ContentModel",
     "ReferenceModel",
     "TaskInfoModel",
-    "TaskStatus",
+    "TaskExecutionStatus",
     "TaskStatusDTO",
+    "TaskResultType",
     "PyObjectId",
 ]

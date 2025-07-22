@@ -19,6 +19,10 @@ from ..models.literature import (
     LiteratureModel,
     MetadataModel,
 )
+from ..models.task import (
+    TaskExecutionStatus,
+    TaskResultType,
+)
 from ..services import GrobidClient
 from .celery_app import celery_app
 from .content_fetcher import ContentFetcher
@@ -32,6 +36,45 @@ from .utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ===============================================
+# Task Status Management
+# ===============================================
+
+
+class TaskStatusManager:
+    """任务状态管理器 - 分离任务执行状态和文献处理状态"""
+
+    def __init__(self, task_id: str):
+        self.task_id = task_id
+
+    def update_task_progress(self, stage: str, progress: int, literature_id: str = None):
+        """更新Celery任务进度（轻量级信息）"""
+        current_task.update_state(
+            state="PROGRESS",
+            meta={
+                "literature_id": literature_id,
+                "current_stage": stage,
+                "progress": progress
+            }
+        )
+
+    def complete_task(self, result_type: TaskResultType, literature_id: str) -> Dict[str, Any]:
+        """完成任务并返回结果"""
+        return {
+            "status": TaskExecutionStatus.COMPLETED,
+            "result_type": result_type,
+            "literature_id": literature_id
+        }
+
+    def fail_task(self, error_message: str, literature_id: str = None) -> Dict[str, Any]:
+        """任务失败"""
+        return {
+            "status": TaskExecutionStatus.FAILED,
+            "error_message": error_message,
+            "literature_id": literature_id
+        }
 
 
 # ===============================================
@@ -148,7 +191,10 @@ async def _process_literature_async(
     try:
         client, database = await create_task_connection()
 
-        update_task_status("任务开始", progress=0)
+        # 初始化任务状态管理器
+        task_manager = TaskStatusManager(task_id)
+        task_manager.update_task_progress("任务开始", 0)
+
         dao = LiteratureDAO.create_from_task_connection(database)
 
         # 1. Enhanced Waterfall Deduplication
@@ -161,14 +207,15 @@ async def _process_literature_async(
         identifiers, _ = extract_authoritative_identifiers(source)
 
         if existing_id:
-            update_task_status("文献已存在", progress=100)
-            return {"status": "SUCCESS_DUPLICATE", "literature_id": existing_id}
+            task_manager.update_task_progress("文献已存在", 100, existing_id)
+            return task_manager.complete_task(TaskResultType.DUPLICATE, existing_id)
 
         # 2. Create Placeholder and update task metadata
         literature_id = await dao.create_placeholder(task_id, identifiers)
-        current_task.update_state(meta={"literature_id": literature_id})
+        task_manager.update_task_progress("创建文献占位符", 10, literature_id)
 
-        update_task_status("获取元数据", progress=20)
+        # 3. 开始获取元数据
+        task_manager.update_task_progress("获取元数据", 20, literature_id)
         await dao.update_enhanced_component_status(
             literature_id=literature_id,
             component="metadata",
@@ -178,7 +225,7 @@ async def _process_literature_async(
             next_action="尝试从外部API获取元数据",
         )
 
-        # 3. Fetch Metadata (Critical Component)
+        # 获取元数据（关键组件）
         metadata_fetcher = MetadataFetcher()
         metadata_result = metadata_fetcher.fetch_metadata_waterfall(
             identifiers=identifiers.model_dump(),
@@ -195,7 +242,7 @@ async def _process_literature_async(
             metadata = metadata_result
             metadata_source = "未知来源"
 
-        # Check if metadata fetch was actually successful and update with enhanced method
+        # 检查元数据获取是否成功并更新状态
         if metadata and metadata.title and metadata.title != "Unknown Title":
             overall_status = await dao.update_enhanced_component_status(
                 literature_id=literature_id,
@@ -449,13 +496,17 @@ async def _process_literature_async(
         )
 
         await dao.finalize_literature(literature_id, literature)
-        update_task_status("处理完成", progress=100)
-        return {"status": "SUCCESS_CREATED", "literature_id": literature_id}
+        task_manager.update_task_progress("处理完成", 100, literature_id)
+        return task_manager.complete_task(TaskResultType.CREATED, literature_id)
 
     except Exception as e:
         logger.error(f"Task {task_id} failed: {e}", exc_info=True)
-        update_task_status("处理失败", progress=100)
-        raise
+        if 'task_manager' in locals():
+            task_manager.update_task_progress("处理失败", 100, locals().get('literature_id'))
+            return task_manager.fail_task(str(e), locals().get('literature_id'))
+        else:
+            # 如果task_manager还没创建，直接抛出异常
+            raise
     finally:
         # Always close the task connection
         if client:

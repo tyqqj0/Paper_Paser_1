@@ -85,7 +85,7 @@ class BusinessLogicDeduplicationTester:
             task_data = result["data"]
             status = task_data.get("status", "unknown")
             
-            if status in ["success_created", "success_duplicate", "failure"]:
+            if status in ["completed", "failed"]:
                 return result
                 
             time.sleep(2)
