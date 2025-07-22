@@ -9,7 +9,11 @@
       "Bash(git config:*)",
       "Bash(touch:*)",
       "Bash(find:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(docker-compose up:*)",
+      "Bash(sudo docker-compose:*)",
+      "Bash(groups $USER)",
+      "Bash(curl:*)"
     ],
     "deny": []
   }

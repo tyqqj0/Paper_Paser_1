@@ -3,10 +3,12 @@ services:
     build:
       context: .
       dockerfile: ./Dockerfile
+      target: prod
     image: literature_parser_backend:${LITERATURE_PARSER_BACKEND_VERSION:-latest}
     restart: always
     env_file:
       - .env
+    command: poetry run python -m literature_parser_backend
     depends_on:
       db:
         condition: service_healthy
@@ -21,6 +23,7 @@ services:
     build:
       context: .
       dockerfile: ./Dockerfile
+      target: prod
     image: literature_parser_backend:${LITERATURE_PARSER_BACKEND_VERSION:-latest}
     restart: always
     env_file:
@@ -118,7 +121,7 @@ services:
       ME_CONFIG_MONGODB_ADMINUSERNAME: literature_parser_backend
       ME_CONFIG_MONGODB_ADMINPASSWORD: literature_parser_backend
       ME_CONFIG_MONGODB_URL: mongodb://literature_parser_backend:literature_parser_backend@literature_parser_backend-db:27017/
-      ME_CONFIG_BASICAUTH: false
+      ME_CONFIG_BASICAUTH: "false"
     depends_on:
       db:
         condition: service_healthy
