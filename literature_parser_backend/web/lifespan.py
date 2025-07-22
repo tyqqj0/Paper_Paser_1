@@ -33,9 +33,6 @@ async def lifespan_setup(
         logger.error(f"Failed to connect to MongoDB: {e}")
         raise
 
-    app.middleware_stack = None
-    app.middleware_stack = app.build_middleware_stack()
-
     yield
 
     # Cleanup on shutdown

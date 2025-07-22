@@ -7,78 +7,124 @@ from fastapi import APIRouter, HTTPException, status
 from loguru import logger
 
 from ...db.dao import LiteratureDAO
-from ...models.task import TaskStatusDTO
+from ...models.task import (
+    TaskStatusDTO,
+    TaskExecutionStatus,
+    TaskResultType,
+    LiteratureProcessingStatus,
+)
 from ...worker.celery_app import celery_app
 
 router = APIRouter(prefix="/task", tags=["任务管理"])
 
 
+class UnifiedStatusManager:
+    """统一状态管理器 - 聚合任务和文献状态"""
+
+    def __init__(self):
+        self.dao = LiteratureDAO()
+
+    def _map_celery_status(self, celery_status: str) -> TaskExecutionStatus:
+        """映射Celery状态到标准任务执行状态"""
+        celery_status = celery_status.upper()
+        if celery_status == "PENDING":
+            return TaskExecutionStatus.PENDING
+        elif celery_status == "PROGRESS":
+            return TaskExecutionStatus.PROCESSING
+        elif celery_status == "SUCCESS":
+            return TaskExecutionStatus.COMPLETED
+        elif celery_status == "FAILURE":
+            return TaskExecutionStatus.FAILED
+        else:
+            return TaskExecutionStatus.PROCESSING  # 默认为处理中
+
+    async def get_unified_status(self, task_id: str) -> TaskStatusDTO:
+        """获取统一的任务状态"""
+        # 1. 获取Celery任务状态
+        task_result = AsyncResult(task_id, app=celery_app)
+        execution_status = self._map_celery_status(task_result.status)
+
+        # 2. 获取文献详细状态
+        literature_status = None
+        literature_id = None
+        result_type = None
+        current_stage = None
+        overall_progress = 0
+
+        # 从Celery meta信息获取literature_id
+        if task_result.info and isinstance(task_result.info, dict):
+            literature_id = task_result.info.get("literature_id")
+            current_stage = task_result.info.get("current_stage")
+            overall_progress = task_result.info.get("progress", 0)
+
+        # 如果任务完成，从结果中获取信息
+        if task_result.ready() and task_result.successful():
+            result = task_result.result
+            if isinstance(result, dict):
+                result_type = result.get("result_type")
+                literature_id = result.get("literature_id")
+                if result.get("status") == TaskExecutionStatus.COMPLETED:
+                    execution_status = TaskExecutionStatus.COMPLETED
+
+        # 如果任务失败
+        if task_result.ready() and not task_result.successful():
+            execution_status = TaskExecutionStatus.FAILED
+
+        # 3. 获取文献的详细处理状态
+        if literature_id:
+            try:
+                literature_status = await self.dao.get_literature_processing_status(literature_id)
+                if literature_status:
+                    # 如果有文献状态，使用文献的进度信息
+                    overall_progress = literature_status.overall_progress
+                    # 获取当前活跃的阶段
+                    active_stages = []
+                    if literature_status.component_status.metadata.status == "processing":
+                        active_stages.append(literature_status.component_status.metadata.stage)
+                    if literature_status.component_status.content.status == "processing":
+                        active_stages.append(literature_status.component_status.content.stage)
+                    if literature_status.component_status.references.status == "processing":
+                        active_stages.append(literature_status.component_status.references.stage)
+
+                    if active_stages:
+                        current_stage = "; ".join(active_stages)
+                    elif literature_status.overall_status == "completed":
+                        current_stage = "处理完成"
+                    elif literature_status.overall_status == "failed":
+                        current_stage = "处理失败"
+            except Exception as e:
+                logger.warning(f"Failed to get literature status for {literature_id}: {e}")
+
+        # 4. 构建统一响应
+        return TaskStatusDTO(
+            task_id=task_id,
+            execution_status=execution_status,
+            result_type=TaskResultType(result_type) if result_type else None,
+            literature_id=literature_id,
+            literature_status=literature_status,
+            status=execution_status.value,  # 向后兼容
+            overall_progress=overall_progress,
+            current_stage=current_stage,
+            resource_url=f"/api/v1/literature/{literature_id}" if literature_id and execution_status == TaskExecutionStatus.COMPLETED else None
+        )
+
+
 @router.get(
-    "/{task_id}", response_model=TaskStatusDTO, summary="Query enhanced task status",
+    "/{task_id}", response_model=TaskStatusDTO, summary="查询统一任务状态",
 )
 async def get_task_status(task_id: str) -> TaskStatusDTO:
-    """Query the status and result of a Celery task with enhanced granular details."""
-    task_result = AsyncResult(task_id, app=celery_app)
-    dao = LiteratureDAO()
+    """查询任务状态 - 返回统一的任务执行状态和文献处理状态"""
+    try:
+        manager = UnifiedStatusManager()
+        return await manager.get_unified_status(task_id)
+    except Exception as e:
+        logger.error(f"Failed to get task status for {task_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取任务状态失败: {str(e)}"
+        )
 
-    response_data = {"task_id": task_id, "status": task_result.status.lower()}
 
-    if task_result.info and isinstance(task_result.info, dict):
-        response_data["details"] = task_result.info
-
-        # If literature_id is available, fetch enhanced granular status from DB
-        literature_id = task_result.info.get("literature_id")
-        if literature_id:
-            literature = await dao.get_literature_by_id(literature_id)
-            if literature and literature.task_info:
-                # Use enhanced component status if available
-                component_status = literature.task_info.component_status
-                if hasattr(component_status, "metadata"):
-                    # New enhanced format
-                    response_data["component_status"] = component_status
-                else:
-                    # Convert legacy format to enhanced format
-                    from ...models.task import ComponentStatus, EnhancedComponentStatus
-
-                    enhanced_status = ComponentStatus(
-                        metadata=EnhancedComponentStatus(
-                            status=component_status.get("metadata", "pending"),
-                            stage=f"状态: {component_status.get('metadata', 'pending')}",
-                        ),
-                        content=EnhancedComponentStatus(
-                            status=component_status.get("content", "pending"),
-                            stage=f"状态: {component_status.get('content', 'pending')}",
-                        ),
-                        references=EnhancedComponentStatus(
-                            status=component_status.get("references", "pending"),
-                            stage=f"状态: {component_status.get('references', 'pending')}",
-                        ),
-                    )
-                    response_data["component_status"] = enhanced_status
-
-                response_data["literature_id"] = literature_id
-
-                # Add enhanced fields
-                if literature.task_info.created_at:
-                    response_data["created_at"] = literature.task_info.created_at
-                if literature.task_info.completed_at:
-                    response_data["updated_at"] = literature.task_info.completed_at
-
-    # Handle final states
-    if task_result.ready():
-        if task_result.successful():
-            result = task_result.result
-            response_data["status"] = result.get("status", "success").lower()
-            response_data["literature_id"] = result.get("literature_id")
-            if response_data["literature_id"]:
-                response_data["resource_url"] = (
-                    f"/api/v1/literature/{response_data['literature_id']}"
-                )
-        else:
-            response_data["status"] = "failure"
-            response_data["details"] = {"error": str(task_result.info)}
-
-    return TaskStatusDTO(**response_data)
 
 
 @router.delete("/{task_id}", summary="Cancel a task")

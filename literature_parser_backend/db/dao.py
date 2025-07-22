@@ -806,3 +806,134 @@ class LiteratureDAO:
             return None
 
         return doc["task_info"]["component_status"]
+
+    async def get_literature_processing_status(
+        self, literature_id: str
+    ) -> Optional["LiteratureProcessingStatus"]:
+        """获取文献的完整处理状态"""
+        from literature_parser_backend.models.task import (
+            LiteratureProcessingStatus,
+            ComponentDetail,
+            ComponentStatus,
+        )
+
+        literature = await self.get_literature_by_id(literature_id)
+        if not literature or not literature.task_info:
+            return None
+
+        # 构建详细状态信息
+        def build_component_detail(component_data) -> ComponentDetail:
+            """从数据库数据构建ComponentDetail"""
+            if hasattr(component_data, 'status'):
+                # 新格式 - EnhancedComponentStatus对象
+                return ComponentDetail(
+                    status=ComponentStatus(component_data.status),
+                    stage=component_data.stage,
+                    progress=component_data.progress,
+                    started_at=component_data.started_at,
+                    completed_at=component_data.completed_at,
+                    error_info=component_data.error_info,
+                    source=component_data.source,
+                    attempts=component_data.attempts,
+                    max_attempts=component_data.max_attempts
+                )
+            else:
+                # 旧格式 - 简单字符串
+                return ComponentDetail(
+                    status=ComponentStatus(component_data if isinstance(component_data, str) else "pending"),
+                    stage="等待开始",
+                    progress=0
+                )
+
+        # 获取组件状态
+        component_status = literature.task_info.component_status
+
+        if hasattr(component_status, 'metadata'):
+            # 新的增强格式 - LiteratureComponentStatus对象
+            metadata_detail = build_component_detail(component_status.metadata)
+            content_detail = build_component_detail(component_status.content)
+            references_detail = build_component_detail(component_status.references)
+        elif isinstance(component_status, dict):
+            # 旧的简单格式 - 字典
+            metadata_detail = build_component_detail(component_status.get("metadata", "pending"))
+            content_detail = build_component_detail(component_status.get("content", "pending"))
+            references_detail = build_component_detail(component_status.get("references", "pending"))
+        else:
+            # 未知格式，使用默认值
+            metadata_detail = build_component_detail("pending")
+            content_detail = build_component_detail("pending")
+            references_detail = build_component_detail("pending")
+
+        # 计算整体状态和进度
+        overall_status = await self._calculate_overall_status(component_status)
+        overall_progress = self._calculate_overall_progress_from_details(
+            metadata_detail, content_detail, references_detail
+        )
+
+        # 构建组件状态
+        from literature_parser_backend.models.task import LiteratureComponentStatus
+        component_status = LiteratureComponentStatus(
+            metadata=metadata_detail,
+            content=content_detail,
+            references=references_detail
+        )
+
+        return LiteratureProcessingStatus(
+            literature_id=literature_id,
+            overall_status=overall_status,
+            overall_progress=overall_progress,
+            component_status=component_status,
+            created_at=literature.created_at,
+            updated_at=literature.updated_at
+        )
+
+    async def _calculate_overall_status(self, component_status) -> str:
+        """计算整体状态"""
+        if hasattr(component_status, 'metadata'):
+            # 新格式 - LiteratureComponentStatus对象
+            statuses = [
+                component_status.metadata.status,
+                component_status.content.status,
+                component_status.references.status
+            ]
+        elif isinstance(component_status, dict):
+            # 旧格式 - 字典
+            statuses = [
+                component_status.get("metadata", "pending"),
+                component_status.get("content", "pending"),
+                component_status.get("references", "pending")
+            ]
+        else:
+            return "unknown"
+
+        # 如果有任何组件失败，整体状态为失败
+        if any(status == "failed" for status in statuses):
+            return "failed"
+        # 如果所有组件成功，整体状态为完成
+        elif all(status == "success" for status in statuses):
+            return "completed"
+        # 如果有组件正在处理，整体状态为处理中
+        elif any(status == "processing" for status in statuses):
+            return "processing"
+        else:
+            return "pending"
+
+    def _calculate_overall_progress_from_details(
+        self, metadata: "ComponentDetail", content: "ComponentDetail", references: "ComponentDetail"
+    ) -> int:
+        """计算整体进度（三个组件的平均值）"""
+        total_progress = metadata.progress + content.progress + references.progress
+        return total_progress // 3
+
+    async def archive_failed_literature(self, literature_id: str):
+        """软删除失败的文献"""
+        await self.collection.update_one(
+            {"_id": ObjectId(literature_id)},
+            {
+                "$set": {
+                    "task_info.status": "archived",
+                    "archived_at": datetime.now(),
+                    "updated_at": datetime.now()
+                }
+            }
+        )

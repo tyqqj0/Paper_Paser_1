@@ -139,10 +139,7 @@ async def wait_for_completion(session, base_url, task_id, timeout=30):
                     status = data.get("status", "unknown")
 
                     if status in [
-                        "success",
-                        "success_created",
-                        "success_duplicate",
-                        "failure",
+                        "completed",
                         "failed",
                     ]:
                         return status

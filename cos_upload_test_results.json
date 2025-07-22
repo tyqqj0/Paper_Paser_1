@@ -7,17 +7,17 @@
     {
       "test_name": "请求上传URL",
       "status": "PASS",
-      "timestamp": 1753175284.3470392,
+      "timestamp": 1753184640.3338468,
       "details": {
-        "message": "成功获取上传URL，对象键: uploads/test_user_123/2025/07/22/b7d894e3-06ff-4307-a801-8ef095d18402.pdf",
-        "object_key": "uploads/test_user_123/2025/07/22/b7d894e3-06ff-4307-a801-8ef095d18402.pdf",
+        "message": "成功获取上传URL，对象键: uploads/test_user_123/2025/07/22/2510ad2e-7b01-4598-abb1-44a638b6d3bc.pdf",
+        "object_key": "uploads/test_user_123/2025/07/22/2510ad2e-7b01-4598-abb1-44a638b6d3bc.pdf",
         "expires": 3600
       }
     },
     {
       "test_name": "上传文件到COS",
       "status": "PASS",
-      "timestamp": 1753175284.9131207,
+      "timestamp": 1753184640.7136025,
       "details": {
         "message": "成功上传文件到COS，大小: 10241 bytes",
         "status_code": 200
@@ -26,43 +26,43 @@
     {
       "test_name": "检查上传状态",
       "status": "PASS",
-      "timestamp": 1753175288.162847,
+      "timestamp": 1753184643.9725666,
       "details": {
         "message": "文件存在，大小: 10241 bytes",
         "file_info": {
-          "objectKey": "uploads/test_user_123/2025/07/22/b7d894e3-06ff-4307-a801-8ef095d18402.pdf",
+          "objectKey": "uploads/test_user_123/2025/07/22/2510ad2e-7b01-4598-abb1-44a638b6d3bc.pdf",
           "exists": true,
           "size": 10241,
           "contentType": "application/pdf",
-          "lastModified": "Tue, 22 Jul 2025 09:08:04 GMT",
-          "publicUrl": "https://paperparser-1330571283.cos.ap-shanghai.myqcloud.com/uploads/test_user_123/2025/07/22/b7d894e3-06ff-4307-a801-8ef095d18402.pdf"
+          "lastModified": "Tue, 22 Jul 2025 11:44:00 GMT",
+          "publicUrl": "https://paperparser-1330571283.cos.ap-shanghai.myqcloud.com/uploads/test_user_123/2025/07/22/2510ad2e-7b01-4598-abb1-44a638b6d3bc.pdf"
         }
       }
     },
     {
       "test_name": "提交文献处理任务",
       "status": "PASS",
-      "timestamp": 1753175288.167153,
+      "timestamp": 1753184644.1801941,
       "details": {
-        "message": "成功提交任务: ffaad532-2060-4c7f-86e0-fd642f4fe359",
-        "task_id": "ffaad532-2060-4c7f-86e0-fd642f4fe359"
+        "message": "成功提交任务: a4a35dbe-6eb0-4762-91a4-b022eaec5aa0",
+        "task_id": "a4a35dbe-6eb0-4762-91a4-b022eaec5aa0"
       }
     },
     {
       "test_name": "文献处理任务完成",
       "status": "PASS",
-      "timestamp": 1753175291.179177,
+      "timestamp": 1753184647.2039897,
       "details": {
-        "message": "任务完成，状态: success_created，文献ID: 687f54f8f8f3ad54554c6c76",
-        "task_id": "ffaad532-2060-4c7f-86e0-fd642f4fe359",
-        "literature_id": "687f54f8f8f3ad54554c6c76",
-        "status": "success_created"
+        "message": "任务完成，状态: success_created，文献ID: 687f7984bfb38497ebaa77d7",
+        "task_id": "a4a35dbe-6eb0-4762-91a4-b022eaec5aa0",
+        "literature_id": "687f7984bfb38497ebaa77d7",
+        "status": "success"
       }
     },
     {
       "test_name": "安全验证-test.exe.pdf...",
       "status": "PASS",
-      "timestamp": 1753175291.1812146,
+      "timestamp": 1753184647.2062035,
       "details": {
         "message": "正确拒绝危险文件名"
       }
@@ -70,7 +70,7 @@
     {
       "test_name": "安全验证-../../../etc/passwd....",
       "status": "PASS",
-      "timestamp": 1753175291.1829643,
+      "timestamp": 1753184647.2080402,
       "details": {
         "message": "正确拒绝危险文件名"
       }
@@ -78,7 +78,7 @@
     {
       "test_name": "安全验证-CON.pdf...",
       "status": "PASS",
-      "timestamp": 1753175291.184829,
+      "timestamp": 1753184647.2100163,
       "details": {
         "message": "正确拒绝危险文件名"
       }
@@ -86,7 +86,7 @@
     {
       "test_name": "安全验证-test<script>.pdf...",
       "status": "PASS",
-      "timestamp": 1753175291.1885805,
+      "timestamp": 1753184647.2118106,
       "details": {
         "message": "正确拒绝危险文件名"
       }
@@ -94,7 +94,7 @@
     {
       "test_name": "安全验证-aaaaaaaaaaaaaaaaaaaa...",
       "status": "PASS",
-      "timestamp": 1753175291.1906304,
+      "timestamp": 1753184647.2135282,
       "details": {
         "message": "正确拒绝危险文件名"
       }

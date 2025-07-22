@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     environment: str = "dev"
 
     log_level: LogLevel = LogLevel.INFO
+
+    # CORS settings
+    cors_origins: list[str] = ["*"]  # 允许的源，生产环境应该设置具体域名
+    cors_methods: list[str] = ["*"]  # 允许的HTTP方法
+    cors_headers: list[str] = ["*"]  # 允许的请求头
+    cors_credentials: bool = True    # 是否允许携带凭证
     # Variables for the database
     db_host: str = "localhost"
     db_port: int = 27017
