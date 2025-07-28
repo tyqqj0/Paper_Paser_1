@@ -222,7 +222,24 @@ class SemanticScholarClient:
             if response.status_code == 200:
                 data = response.json()
                 references = []
-                for ref_item in data.get("data", []):
+
+                # 检查data字段是否存在且不为None
+                data_list = data.get("data")
+                if data_list is None:
+                    # 检查是否有出版商限制的提示信息
+                    citing_info = data.get("citingPaperInfo", {})
+                    open_access_pdf = citing_info.get("openAccessPdf", {})
+                    disclaimer = open_access_pdf.get("disclaimer", "")
+
+                    if "elided by the publisher" in disclaimer:
+                        logger.warning(f"References access restricted by publisher for {identifier}")
+                        logger.info(f"Publisher restriction details: {disclaimer}")
+                    else:
+                        logger.warning(f"No references data available for {identifier}")
+                    return []
+
+                # 正常处理references数据
+                for ref_item in data_list:
                     cited_paper = ref_item.get("citedPaper", {})
                     if cited_paper:
                         parsed_ref = self._parse_paper_data(cited_paper)

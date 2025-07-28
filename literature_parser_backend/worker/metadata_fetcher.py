@@ -218,18 +218,49 @@ class MetadataFetcher:
     ) -> MetadataModel:
         """Convert CrossRef API response to a standardized MetadataModel."""
         authors = []
-        for author_data in crossref_data.get("author", []):
-            name = (
-                f"{author_data.get('given', '')} "
-                f"{author_data.get('family', '')}".strip()
-            )
+        # CrossRef客户端返回的是"authors"字段，原始API返回的是"author"字段
+        author_list = crossref_data.get("authors", crossref_data.get("author", []))
+        logger.debug(f"DEBUG: 处理作者数据，输入作者数量: {len(author_list)}")
+
+        for i, author_data in enumerate(author_list):
+            logger.debug(f"DEBUG: 处理作者 {i+1}: {author_data}")
+
+            # 处理CrossRef客户端返回的格式 (family_name, given_names)
+            if "family_name" in author_data:
+                given_names = author_data.get("given_names", [])
+                given = " ".join(given_names) if given_names else ""
+                family = author_data.get("family_name", "")
+                name = f"{given} {family}".strip()
+                logger.debug(f"DEBUG: 使用family_name格式，生成姓名: '{name}'")
+            # 处理原始CrossRef API格式 (given, family)
+            else:
+                name = (
+                    f"{author_data.get('given', '')} "
+                    f"{author_data.get('family', '')}".strip()
+                )
+                logger.debug(f"DEBUG: 使用given/family格式，生成姓名: '{name}'")
+
             if name:
                 authors.append(AuthorModel(name=name))
+                logger.debug(f"DEBUG: 成功添加作者: '{name}'")
+            else:
+                logger.debug(f"DEBUG: 跳过空姓名的作者")
 
-        year = None
-        published = crossref_data.get("published", {})
-        if published and "date-parts" in published:
-            year = int(published["date-parts"][0][0])
+        logger.debug(f"DEBUG: 最终作者数量: {len(authors)}")
+
+        # 优先使用已经解析好的年份字段
+        year = crossref_data.get("year")
+
+        # 如果没有解析好的年份，尝试从原始日期字段解析
+        if year is None:
+            for date_field in ["published-print", "published-online", "issued", "created"]:
+                published = crossref_data.get(date_field, {})
+                if published and "date-parts" in published and published["date-parts"]:
+                    try:
+                        year = int(published["date-parts"][0][0])
+                        break  # 找到年份后立即退出
+                    except (IndexError, ValueError, TypeError):
+                        continue
 
         metadata = MetadataModel(
             title=crossref_data.get("title") or "Unknown Title",
