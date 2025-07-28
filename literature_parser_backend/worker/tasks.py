@@ -8,6 +8,7 @@ the intelligent hybrid workflow for gathering metadata and references.
 import asyncio
 import hashlib
 import logging
+# from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 
 from celery import Task, current_task
@@ -48,25 +49,68 @@ class TaskStatusManager:
 
     def __init__(self, task_id: str):
         self.task_id = task_id
+        self.url_validation_info = None
 
     def update_task_progress(self, stage: str, progress: int, literature_id: str = None):
         """更新Celery任务进度（轻量级信息）"""
+        meta = {
+            "literature_id": literature_id,
+            "current_stage": stage,
+            "progress": progress
+        }
+
+        # 如果有URL验证信息，添加到meta中
+        if self.url_validation_info:
+            meta.update({
+                "url_validation_status": self.url_validation_info.get("status"),
+                "url_validation_error": self.url_validation_info.get("error"),
+                "original_url": self.url_validation_info.get("original_url"),
+            })
+
         current_task.update_state(
             state="PROGRESS",
-            meta={
-                "literature_id": literature_id,
-                "current_stage": stage,
-                "progress": progress
-            }
+            meta=meta
+        )
+
+    def set_url_validation_info(self, url_validation_info: Dict[str, Any]):
+        """设置URL验证信息"""
+        self.url_validation_info = url_validation_info
+
+    def fail_task_with_url_validation_error(self, error_info, original_url: str = None):
+        """因URL验证失败而终止任务"""
+        # 不使用FAILURE状态，而是使用PROGRESS状态来避免Celery序列化问题
+        meta = {
+            "error": error_info.error_message,
+            "error_type": error_info.error_type,
+            "error_category": error_info.error_category,
+            "url_validation_status": "failed",
+            "url_validation_error": error_info.error_message,
+            "original_url": original_url,
+            "url_validation_details": error_info.url_validation_details,
+            "task_failed": True,  # 标记任务失败
+        }
+
+        current_task.update_state(
+            state="PROGRESS",  # 使用PROGRESS而不是FAILURE
+            meta=meta
         )
 
     def complete_task(self, result_type: TaskResultType, literature_id: str) -> Dict[str, Any]:
         """完成任务并返回结果"""
-        return {
+        result = {
             "status": TaskExecutionStatus.COMPLETED,
             "result_type": result_type,
             "literature_id": literature_id
         }
+
+        # 如果有URL验证信息，添加到结果中
+        if self.url_validation_info:
+            result.update({
+                "url_validation_status": self.url_validation_info.get("status"),
+                "original_url": self.url_validation_info.get("original_url"),
+            })
+
+        return result
 
     def fail_task(self, error_message: str, literature_id: str = None) -> Dict[str, Any]:
         """任务失败"""
@@ -204,7 +248,47 @@ async def _process_literature_async(
         )
 
         # Extract identifiers for downstream processing
-        identifiers, _ = extract_authoritative_identifiers(source)
+        try:
+            identifiers, _, url_validation_info = extract_authoritative_identifiers(source)
+
+            # 如果有URL验证信息，存储到任务状态中
+            if url_validation_info:
+                task_manager.set_url_validation_info(url_validation_info)
+
+        except ValueError as e:
+            # URL验证失败，创建错误信息并终止任务
+            if "URL验证失败" in str(e):
+                logger.error(f"任务 {task_id} URL验证失败: {e}")
+
+                # 创建URL验证失败的错误信息
+                from ..models.task import TaskErrorInfo
+                from datetime import datetime
+                error_info = TaskErrorInfo(
+                    error_type="URLValidationError",
+                    error_message=str(e),
+                    error_category="url_validation",
+                    url_validation_details={
+                        "original_url": source.get("url"),
+                        "error_type": "url_not_accessible",
+                        "validation_time": str(datetime.now()),
+                    }
+                )
+
+                # 更新任务状态为失败
+                task_manager.fail_task_with_url_validation_error(error_info, source.get("url"))
+
+                # 直接返回URL验证失败的结果，不抛出异常（避免Celery序列化问题）
+                return {
+                    "status": TaskExecutionStatus.FAILED,
+                    "error_message": str(e),
+                    "error_category": "url_validation",
+                    "url_validation_status": "failed",
+                    "url_validation_error": str(e),
+                    "original_url": source.get("url"),
+                }
+            else:
+                # 其他类型的错误，继续原有处理逻辑
+                raise e
 
         if existing_id:
             task_manager.update_task_progress("文献已存在", 100, existing_id)
