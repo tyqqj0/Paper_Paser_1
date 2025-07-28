@@ -276,11 +276,11 @@ class WaterfallDeduplicator:
         # Try PDF URL first
         if pdf_url := source_data.get("pdf_url"):
             try:
-                result = await self.content_fetcher.fetch_pdf_content(
-                    {"pdf_url": pdf_url},
+                content_model, _ = self.content_fetcher.fetch_content_waterfall(
+                    user_pdf_url=pdf_url,
                 )
-                if result and isinstance(result, tuple) and len(result) >= 2:
-                    return result[1]  # pdf_content
+                if content_model and content_model.pdf_content:
+                    return content_model.pdf_content
             except Exception as e:
                 logger.warning(
                     f"Task {self.task_id}: Failed to fetch from pdf_url: {e}",
@@ -289,9 +289,11 @@ class WaterfallDeduplicator:
         # Try general URL
         if url := source_data.get("url"):
             try:
-                result = await self.content_fetcher.fetch_pdf_content({"url": url})
-                if result and isinstance(result, tuple) and len(result) >= 2:
-                    return result[1]  # pdf_content
+                content_model, _ = self.content_fetcher.fetch_content_waterfall(
+                    user_pdf_url=url,
+                )
+                if content_model and content_model.pdf_content:
+                    return content_model.pdf_content
             except Exception as e:
                 logger.warning(f"Task {self.task_id}: Failed to fetch from url: {e}")
 

@@ -47,10 +47,39 @@ def extract_authoritative_identifiers(
     """
     Extract authoritative identifiers from source data.
     Priority: DOI > ArXiv ID > Other academic IDs > Generated fingerprint
+
+    Enhanced with URL mapping service for better URL support.
     """
     identifiers = IdentifiersModel(doi=None, arxiv_id=None, fingerprint=None)
     primary_type = None
 
+    # 首先尝试使用URL映射服务（新功能）
+    if source.get("url"):
+        try:
+            from ..services.url_mapper import get_url_mapping_service
+            url_service = get_url_mapping_service()
+            # 使用同步版本的map_url以保持兼容性
+            mapping_result = url_service.map_url_sync(source["url"])
+
+            if mapping_result.doi:
+                identifiers.doi = mapping_result.doi
+                primary_type = "doi"
+            elif mapping_result.arxiv_id:
+                identifiers.arxiv_id = mapping_result.arxiv_id
+                if not primary_type:
+                    primary_type = "arxiv"
+
+            # 如果URL映射服务找到了标识符，直接返回
+            if identifiers.doi or identifiers.arxiv_id:
+                return identifiers, primary_type or "unknown"
+
+        except Exception as e:
+            # 如果URL映射服务失败，回退到传统方法
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"URL映射服务失败，回退到传统方法: {e}")
+
+    # 传统方法作为备用（保持向后兼容）
     # Extract DOI
     doi_pattern = r"10\.\d{4,}/[^\s]+"
     if source.get("url") and "doi.org" in source["url"]:
