@@ -24,9 +24,23 @@ class UnifiedStatusManager:
     def __init__(self):
         self.dao = LiteratureDAO()
 
-    def _map_celery_status(self, celery_status: str) -> TaskExecutionStatus:
+    def _map_celery_status(self, celery_status: str, task_info: dict = None) -> TaskExecutionStatus:
         """映射Celery状态到标准任务执行状态"""
         celery_status = celery_status.upper()
+
+        # 检查任务结果中的业务状态
+        if (task_info and
+            isinstance(task_info, dict) and
+            task_info.get("status") == "failed"):
+            return TaskExecutionStatus.FAILED
+
+        # 检查是否是URL验证失败的特殊情况（PROGRESS状态）
+        if (celery_status == "PROGRESS" and
+            task_info and
+            isinstance(task_info, dict) and
+            task_info.get("task_failed")):
+            return TaskExecutionStatus.FAILED
+
         if celery_status == "PENDING":
             return TaskExecutionStatus.PENDING
         elif celery_status == "PROGRESS":
@@ -42,7 +56,7 @@ class UnifiedStatusManager:
         """获取统一的任务状态"""
         # 1. 获取Celery任务状态
         task_result = AsyncResult(task_id, app=celery_app)
-        execution_status = self._map_celery_status(task_result.status)
+        execution_status = self._map_celery_status(task_result.status, task_result.info)
 
         # 2. 获取文献详细状态
         literature_status = None
@@ -51,11 +65,21 @@ class UnifiedStatusManager:
         current_stage = None
         overall_progress = 0
 
-        # 从Celery meta信息获取literature_id
+        # 3. 获取URL验证相关信息
+        url_validation_status = None
+        url_validation_error = None
+        original_url = None
+
+        # 从Celery meta信息获取各种状态信息
         if task_result.info and isinstance(task_result.info, dict):
             literature_id = task_result.info.get("literature_id")
             current_stage = task_result.info.get("current_stage")
             overall_progress = task_result.info.get("progress", 0)
+
+            # 提取URL验证信息
+            url_validation_status = task_result.info.get("url_validation_status")
+            url_validation_error = task_result.info.get("url_validation_error")
+            original_url = task_result.info.get("original_url")
 
         # 如果任务完成，从结果中获取信息
         if task_result.ready() and task_result.successful():
@@ -113,6 +137,10 @@ class UnifiedStatusManager:
             status=execution_status.value,  # 向后兼容
             overall_progress=overall_progress,
             current_stage=current_stage,
+            # URL验证相关字段（新增）
+            url_validation_status=url_validation_status,
+            url_validation_error=url_validation_error,
+            original_url=original_url,
             resource_url=f"/api/v1/literature/{literature_id}" if literature_id and execution_status == TaskExecutionStatus.COMPLETED else None
         )
 

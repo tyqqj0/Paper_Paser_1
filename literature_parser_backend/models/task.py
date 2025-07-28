@@ -215,6 +215,16 @@ class TaskErrorInfo(BaseModel):
         description="Detailed error information (e.g., API responses)",
     )
 
+    # URL验证错误相关字段（新增）
+    error_category: Optional[str] = Field(
+        None,
+        description="错误类别: url_validation/metadata_fetch/content_parse/references_fetch"
+    )
+    url_validation_details: Optional[Dict[str, Any]] = Field(
+        None,
+        description="URL验证详细信息"
+    )
+
     class Config:
         json_schema_extra: ClassVar[Dict[str, Any]] = {
             "example": {
@@ -262,6 +272,20 @@ class TaskStatusDTO(BaseModel):
     current_stage: Optional[str] = Field(
         None,
         description="当前阶段描述"
+    )
+
+    # URL验证相关字段（新增）
+    url_validation_status: Optional[str] = Field(
+        None,
+        description="URL验证状态: success/failed/skipped"
+    )
+    url_validation_error: Optional[str] = Field(
+        None,
+        description="URL验证错误信息"
+    )
+    original_url: Optional[str] = Field(
+        None,
+        description="原始提交的URL"
     )
 
     # 错误信息

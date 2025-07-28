@@ -43,23 +43,57 @@ def update_task_status(
 
 def extract_authoritative_identifiers(
     source: Dict[str, Any],
-) -> Tuple[IdentifiersModel, str]:
+) -> Tuple[IdentifiersModel, str, Optional[Dict[str, Any]]]:
     """
     Extract authoritative identifiers from source data.
     Priority: DOI > ArXiv ID > Other academic IDs > Generated fingerprint
 
     Enhanced with URL mapping service for better URL support.
+
+    Returns:
+        Tuple of (identifiers, primary_type, url_validation_info)
     """
     identifiers = IdentifiersModel(doi=None, arxiv_id=None, fingerprint=None)
     primary_type = None
+    url_validation_info = None
 
     # 首先尝试使用URL映射服务（新功能）
     if source.get("url"):
         try:
-            from ..services.url_mapper import get_url_mapping_service
-            url_service = get_url_mapping_service()
-            # 使用同步版本的map_url以保持兼容性
-            mapping_result = url_service.map_url_sync(source["url"])
+            # 先进行URL验证
+            from ..services.url_mapping.core.service import URLMappingService
+            temp_service = URLMappingService(enable_url_validation=True)
+
+            # 直接使用URL验证功能
+            if not temp_service._validate_url(source["url"]):
+                # URL验证失败，记录详细信息并抛出异常
+                url_validation_info = {
+                    "status": "failed",
+                    "error": f"URL {source['url']} 无法访问或不存在",
+                    "original_url": source["url"],
+                    "validation_details": {
+                        "error_type": "url_not_accessible",
+                        "validation_time": datetime.now().isoformat(),
+                    }
+                }
+                logger.warning(f"URL验证失败: {source['url']}")
+                raise ValueError(f"URL验证失败: {url_validation_info['error']}")
+
+            # URL验证成功，继续使用旧版本的URL映射服务
+            from ..services.url_mapper import get_url_mapping_service as get_old_service
+            old_url_service = get_old_service()
+            mapping_result = old_url_service.map_url_sync(source["url"])
+
+            # 记录URL验证成功信息
+            url_validation_info = {
+                "status": "success",
+                "original_url": source["url"],
+                "validation_details": {
+                    "validation_time": datetime.now().isoformat(),
+                }
+            }
+
+            # URL验证已经在上面完成，这里直接处理映射结果
 
             if mapping_result.doi:
                 identifiers.doi = mapping_result.doi
@@ -71,13 +105,26 @@ def extract_authoritative_identifiers(
 
             # 如果URL映射服务找到了标识符，直接返回
             if identifiers.doi or identifiers.arxiv_id:
-                return identifiers, primary_type or "unknown"
+                return identifiers, primary_type or "unknown", url_validation_info
 
         except Exception as e:
-            # 如果URL映射服务失败，回退到传统方法
-            import logging
-            logger = logging.getLogger(__name__)
+            # 如果是URL验证失败，直接抛出
+            if "URL验证失败" in str(e):
+                raise e
+
+            # 其他异常，回退到传统方法
             logger.warning(f"URL映射服务失败，回退到传统方法: {e}")
+            # 记录URL映射服务失败信息
+            if source.get("url"):
+                url_validation_info = {
+                    "status": "skipped",
+                    "error": f"URL映射服务异常: {str(e)}",
+                    "original_url": source["url"],
+                    "validation_details": {
+                        "error_type": "service_error",
+                        "validation_time": datetime.now().isoformat(),
+                    }
+                }
 
     # 传统方法作为备用（保持向后兼容）
     # Extract DOI
@@ -101,7 +148,7 @@ def extract_authoritative_identifiers(
         if not primary_type:
             primary_type = "arxiv"
 
-    return identifiers, primary_type or "unknown"
+    return identifiers, primary_type or "unknown", url_validation_info
 
 
 def convert_grobid_to_metadata(grobid_data: Dict[str, Any]) -> MetadataModel:

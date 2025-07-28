@@ -396,6 +396,195 @@ async def process_neurips_match(match: re.Match, result: URLMappingResult,
     result.confidence = 0.8
 
 
+async def process_plos_match(match: re.Match, result: URLMappingResult,
+                           pattern_name: str, url: str, context: Dict[str, Any]):
+    """处理PLOS ONE URL匹配结果"""
+    doi = match.group(1)
+    result.doi = doi
+    result.source_page_url = url
+    result.venue = "PLOS ONE"
+    result.confidence = 0.95
+
+
+async def process_acm_match(match: re.Match, result: URLMappingResult,
+                          pattern_name: str, url: str, context: Dict[str, Any]):
+    """处理ACM Digital Library URL匹配结果"""
+    doi = match.group(1)
+    result.doi = doi
+    result.source_page_url = url
+    result.venue = "ACM"
+    result.confidence = 0.95
+
+
+async def process_science_match(match: re.Match, result: URLMappingResult,
+                              pattern_name: str, url: str, context: Dict[str, Any]):
+    """处理Science期刊URL匹配结果"""
+    if pattern_name == "science_content":
+        # 从URL路径提取信息: content/347/6220/1260419
+        volume = match.group(1)
+        issue = match.group(2)
+        article_id = match.group(3)
+
+        result.source_page_url = url
+        result.venue = "Science"
+
+        # 尝试构建Science DOI: 10.1126/science.{article_id}
+        # Science的DOI格式通常是 10.1126/science.{article_id}
+        if article_id.isdigit():
+            constructed_doi = f"10.1126/science.{article_id}"
+            result.doi = constructed_doi
+            result.confidence = 0.85  # 中高置信度，因为是构建的DOI
+        else:
+            result.confidence = 0.8   # 较低置信度，无法构建DOI
+
+    elif pattern_name == "science_doi":
+        # 直接从URL中提取DOI
+        doi = match.group(1)
+        result.doi = doi
+        result.source_page_url = url
+        result.venue = "Science"
+        result.confidence = 0.95
+    elif pattern_name == "science_article":
+        # 处理新格式的Science URL
+        article_id = match.group(1)
+        result.source_page_url = url
+        result.venue = "Science"
+        result.confidence = 0.85
+
+
+async def process_springer_match(match: re.Match, result: URLMappingResult,
+                               pattern_name: str, url: str, context: Dict[str, Any]):
+    """处理Springer URL匹配结果"""
+    doi = match.group(1)
+    result.doi = doi
+    result.source_page_url = url
+    result.venue = "Springer"
+    result.confidence = 0.95
+
+
+async def process_cell_match(match: re.Match, result: URLMappingResult,
+                           pattern_name: str, url: str, context: Dict[str, Any]):
+    """处理Cell期刊URL匹配结果"""
+    if pattern_name == "cell_fulltext":
+        # 从URL中提取文章ID: S0092-8674(23)00001-0
+        article_id = match.group(1)
+        result.source_page_url = url
+        result.venue = "Cell"
+
+        # Cell的DOI通常是 10.1016/j.cell.{year}.{month}.{day}
+        # 但从URL中的格式很难直接构建，需要其他策略
+        result.confidence = 0.8
+    elif pattern_name == "cell_doi":
+        # 直接从URL中提取DOI
+        doi = match.group(1)
+        result.doi = doi
+        result.source_page_url = url
+        result.venue = "Cell"
+        result.confidence = 0.95
+
+
+# ===============================================
+# 通用备选策略和适配器
+# ===============================================
+
+async def generic_doi_extraction_func(url: str, context: Dict[str, Any]) -> Optional[URLMappingResult]:
+    """通用DOI提取函数 - 从任何URL中尝试提取DOI"""
+    try:
+        logger.info(f"尝试通用DOI提取: {url}")
+
+        # 方法1: 从URL路径直接提取DOI
+        doi_pattern = r'10\.\d{4,}/[A-Za-z0-9\.\-_/]+'
+        match = re.search(doi_pattern, url)
+        if match:
+            doi = match.group()
+            logger.info(f"✅ 从URL路径提取到DOI: {doi}")
+
+            result = URLMappingResult()
+            result.doi = doi
+            result.source_page_url = url
+            result.venue = "Unknown"
+            result.confidence = 0.7  # 中等置信度
+            return result
+
+        # 方法2: 尝试页面解析提取DOI
+        import requests
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                content = response.text
+
+                # 查找meta标签中的DOI
+                meta_patterns = [
+                    r'<meta[^>]*name=["\']citation_doi["\'][^>]*content=["\']([^"\']+)["\']',
+                    r'<meta[^>]*property=["\']citation_doi["\'][^>]*content=["\']([^"\']+)["\']',
+                    r'<meta[^>]*name=["\']DC\.identifier["\'][^>]*content=["\']doi:([^"\']+)["\']'
+                ]
+
+                for pattern in meta_patterns:
+                    meta_match = re.search(pattern, content, re.IGNORECASE)
+                    if meta_match:
+                        doi = meta_match.group(1)
+                        logger.info(f"✅ 从meta标签提取到DOI: {doi}")
+
+                        result = URLMappingResult()
+                        result.doi = doi
+                        result.source_page_url = url
+                        result.venue = "Unknown"
+                        result.confidence = 0.8  # 较高置信度
+                        return result
+
+                # 查找页面内容中的DOI
+                content_matches = re.findall(doi_pattern, content)
+                if content_matches:
+                    # 选择最可能的DOI（通常是第一个）
+                    doi = content_matches[0]
+                    logger.info(f"✅ 从页面内容提取到DOI: {doi}")
+
+                    result = URLMappingResult()
+                    result.doi = doi
+                    result.source_page_url = url
+                    result.venue = "Unknown"
+                    result.confidence = 0.6  # 较低置信度
+                    return result
+
+        except Exception as e:
+            logger.warning(f"页面解析失败: {e}")
+
+        logger.info(f"❌ 通用DOI提取未找到结果")
+        return None
+
+    except Exception as e:
+        logger.warning(f"通用DOI提取失败: {e}")
+        return None
+
+
+async def semantic_scholar_lookup_func(url: str, context: Dict[str, Any]) -> Optional[URLMappingResult]:
+    """使用Semantic Scholar查询URL对应的论文"""
+    try:
+        logger.info(f"尝试Semantic Scholar URL查询: {url}")
+
+        # 导入Semantic Scholar客户端
+        from ..services.semantic_scholar import SemanticScholarClient
+
+        client = SemanticScholarClient()
+
+        # Semantic Scholar支持通过URL查询，但需要特定格式
+        # 这里我们可以尝试搜索URL中的关键词
+        # 注意：这是一个实验性功能，可能需要根据实际API调整
+
+        # 暂时返回None，表示此策略尚未完全实现
+        logger.debug("Semantic Scholar URL查询策略尚未完全实现")
+        return None
+
+    except Exception as e:
+        logger.warning(f"Semantic Scholar查询失败: {e}")
+        return None
+
+
 class ArXivAdapter(URLAdapter):
     """ArXiv适配器 - 支持多策略的增强版本"""
 
@@ -647,6 +836,166 @@ class NeurIPSAdapter(URLAdapter):
         ]
 
 
+class PLOSAdapter(URLAdapter):
+    """PLOS适配器 - 处理PLOS ONE等PLOS期刊"""
+
+    @property
+    def name(self) -> str:
+        return "plos"
+
+    @property
+    def supported_domains(self) -> List[str]:
+        return ["journals.plos.org"]
+
+    def can_handle(self, url: str) -> bool:
+        return "journals.plos.org" in url.lower()
+
+    def _register_strategies(self):
+        """注册PLOS支持的策略"""
+        # PLOS正则策略
+        plos_patterns = {
+            "plos_article": r"journals\.plos\.org/[^/]+/article\?id=(10\.\d{4}/[^&\s]+)",
+        }
+
+        self.strategies = [
+            RegexStrategy("plos_regex", plos_patterns, process_plos_match, priority=1),
+        ]
+
+
+class ACMAdapter(URLAdapter):
+    """ACM适配器 - 处理ACM Digital Library"""
+
+    @property
+    def name(self) -> str:
+        return "acm"
+
+    @property
+    def supported_domains(self) -> List[str]:
+        return ["dl.acm.org", "portal.acm.org"]
+
+    def can_handle(self, url: str) -> bool:
+        return any(domain in url.lower() for domain in self.supported_domains)
+
+    def _register_strategies(self):
+        """注册ACM支持的策略"""
+        # ACM正则策略
+        acm_patterns = {
+            "acm_doi": r"dl\.acm\.org/doi/(?:abs/|full/)?(10\.\d{4}/[^?\s]+)",
+            "acm_citation": r"dl\.acm\.org/citation\.cfm\?id=(\d+)",
+        }
+
+        self.strategies = [
+            RegexStrategy("acm_regex", acm_patterns, process_acm_match, priority=1),
+        ]
+
+
+class ScienceAdapter(URLAdapter):
+    """Science适配器 - 处理Science期刊"""
+
+    @property
+    def name(self) -> str:
+        return "science"
+
+    @property
+    def supported_domains(self) -> List[str]:
+        return ["science.sciencemag.org", "www.science.org"]
+
+    def can_handle(self, url: str) -> bool:
+        return any(domain in url.lower() for domain in self.supported_domains)
+
+    def _register_strategies(self):
+        """注册Science支持的策略"""
+        # Science正则策略
+        science_patterns = {
+            "science_content": r"science\.sciencemag\.org/content/(\d+)/(\d+)/(\d+)",
+            "science_doi": r"(?:science\.sciencemag\.org|www\.science\.org)/doi/(?:abs/|full/)?(10\.\d{4}/[^?\s]+)",
+            "science_article": r"(?:science\.sciencemag\.org|www\.science\.org)/content/article/([^?\s]+)",
+        }
+
+        self.strategies = [
+            RegexStrategy("science_regex", science_patterns, process_science_match, priority=1),
+        ]
+
+
+class SpringerAdapter(URLAdapter):
+    """Springer适配器 - 处理Springer期刊"""
+
+    @property
+    def name(self) -> str:
+        return "springer"
+
+    @property
+    def supported_domains(self) -> List[str]:
+        return ["link.springer.com", "www.springer.com"]
+
+    def can_handle(self, url: str) -> bool:
+        return any(domain in url.lower() for domain in self.supported_domains)
+
+    def _register_strategies(self):
+        """注册Springer支持的策略"""
+        # Springer正则策略
+        springer_patterns = {
+            "springer_article": r"link\.springer\.com/article/(10\.\d{4}/[^?\s]+)",
+        }
+
+        self.strategies = [
+            RegexStrategy("springer_regex", springer_patterns, process_springer_match, priority=1),
+        ]
+
+
+class CellAdapter(URLAdapter):
+    """Cell适配器 - 处理Cell期刊"""
+
+    @property
+    def name(self) -> str:
+        return "cell"
+
+    @property
+    def supported_domains(self) -> List[str]:
+        return ["www.cell.com", "cell.com"]
+
+    def can_handle(self, url: str) -> bool:
+        return any(domain in url.lower() for domain in self.supported_domains)
+
+    def _register_strategies(self):
+        """注册Cell支持的策略"""
+        # Cell正则策略
+        cell_patterns = {
+            "cell_fulltext": r"cell\.com/cell/fulltext/([^?\s]+)",
+            "cell_doi": r"cell\.com/(?:cell/)?(?:abstract|fulltext)/doi/(10\.\d{4}/[^?\s]+)",
+        }
+
+        self.strategies = [
+            RegexStrategy("cell_regex", cell_patterns, process_cell_match, priority=1),
+        ]
+
+
+class GenericAdapter(URLAdapter):
+    """通用适配器 - 处理未知期刊的备选方案"""
+
+    @property
+    def name(self) -> str:
+        return "generic"
+
+    @property
+    def supported_domains(self) -> List[str]:
+        return []  # 不限制域名，作为最后的备选方案
+
+    def can_handle(self, url: str) -> bool:
+        # 总是返回True，但优先级最低，只有在其他适配器都失败时才会使用
+        return True
+
+    def _register_strategies(self):
+        """注册通用支持的策略"""
+        self.strategies = [
+            # 策略1: 通用DOI提取（优先级最高）
+            DatabaseStrategy("generic_doi_extraction", generic_doi_extraction_func, priority=1),
+
+            # 策略2: Semantic Scholar查询（实验性）
+            DatabaseStrategy("generic_semantic_scholar", semantic_scholar_lookup_func, priority=2),
+        ]
+
+
 class URLMappingService:
     """URL映射服务主类"""
 
@@ -657,11 +1006,20 @@ class URLMappingService:
     def _register_default_adapters(self):
         """注册默认适配器"""
         self.adapters = [
+            # 专门适配器（优先级高）
             ArXivAdapter(),
             CVFAdapter(),
             NatureAdapter(),
             IEEEAdapter(),
             NeurIPSAdapter(),
+            PLOSAdapter(),
+            ACMAdapter(),
+            ScienceAdapter(),
+            SpringerAdapter(),
+            CellAdapter(),
+
+            # 通用适配器（优先级最低，作为备选方案）
+            GenericAdapter(),
         ]
     
     def register_adapter(self, adapter: URLAdapter):
@@ -681,10 +1039,14 @@ class URLMappingService:
         """
         logger.debug(f"开始映射URL: {url}")
 
-        # 尝试每个适配器
-        for adapter in self.adapters:
+        # 分离专门适配器和通用适配器
+        specialized_adapters = [a for a in self.adapters if a.name != "generic"]
+        generic_adapters = [a for a in self.adapters if a.name == "generic"]
+
+        # 首先尝试专门适配器
+        for adapter in specialized_adapters:
             if adapter.can_handle(url):
-                logger.debug(f"使用适配器 {adapter.name} 处理URL")
+                logger.debug(f"使用专门适配器 {adapter.name} 处理URL")
                 try:
                     result = await adapter.extract_identifiers(url)
                     # 检查是否有有效的标识符或有用信息
@@ -700,8 +1062,27 @@ class URLMappingService:
                     logger.warning(f"适配器 {adapter.name} 处理URL失败: {e}")
                     continue
 
-        # 如果没有适配器能处理，返回空结果
-        logger.debug(f"没有适配器能处理URL: {url}")
+        # 如果专门适配器都失败，尝试通用适配器作为备选方案
+        logger.debug(f"专门适配器都失败，尝试通用备选方案")
+        for adapter in generic_adapters:
+            logger.debug(f"使用通用适配器 {adapter.name} 处理URL")
+            try:
+                result = await adapter.extract_identifiers(url)
+                # 检查是否有有效的标识符或有用信息
+                has_identifiers = bool(result.doi or result.arxiv_id)
+                has_useful_info = bool(result.venue or result.source_page_url or result.pdf_url)
+
+                if has_identifiers or has_useful_info:
+                    logger.info(f"通用适配器成功映射URL: {url} -> DOI:{result.doi}, ArXiv:{result.arxiv_id}, Venue:{result.venue}, 策略:{result.strategy_used}")
+                    return result
+                else:
+                    logger.debug(f"通用适配器 {adapter.name} 未找到有效标识符或有用信息")
+            except Exception as e:
+                logger.warning(f"通用适配器 {adapter.name} 处理URL失败: {e}")
+                continue
+
+        # 如果所有适配器都失败，返回空结果
+        logger.debug(f"所有适配器都无法处理URL: {url}")
         return URLMappingResult()
 
     def map_url_sync(self, url: str) -> URLMappingResult:
