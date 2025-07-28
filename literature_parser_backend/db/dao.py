@@ -451,7 +451,7 @@ class LiteratureDAO:
 
         await self.collection.replace_one({"_id": ObjectId(literature_id)}, final_doc)
 
-    async def _calculate_overall_status(self, component_status: Dict[str, Any]) -> str:
+    async def _calculate_overall_status(self, component_status) -> str:
         """
         Calculate overall task status based on enhanced component statuses.
 
@@ -463,9 +463,14 @@ class LiteratureDAO:
         - If any critical component failed: failed (stricter logic)
         - If no critical components failed but some are still pending: partial_success
         """
-        # Extract component statuses - handle both old and new formats
-        if isinstance(component_status.get("metadata"), dict):
-            # New enhanced format
+        # Extract component statuses - handle multiple formats
+        if hasattr(component_status, 'metadata'):
+            # New LiteratureComponentStatus object format
+            metadata_status = component_status.metadata.status
+            content_status = component_status.content.status
+            references_status = component_status.references.status
+        elif isinstance(component_status, dict) and isinstance(component_status.get("metadata"), dict):
+            # Enhanced dict format
             metadata_status = component_status.get("metadata", {}).get(
                 "status", "pending",
             )
@@ -475,11 +480,13 @@ class LiteratureDAO:
             references_status = component_status.get("references", {}).get(
                 "status", "pending",
             )
-        else:
+        elif isinstance(component_status, dict):
             # Old simple format (backward compatibility)
             metadata_status = component_status.get("metadata", "pending")
             content_status = component_status.get("content", "pending")
             references_status = component_status.get("references", "pending")
+        else:
+            return "unknown"
 
         # Check if any critical component is still processing
         critical_statuses = [
@@ -499,15 +506,15 @@ class LiteratureDAO:
         if successful_critical == len(critical_statuses):
             # All critical components succeeded, but check if content failed
             if content_status == "failed":
-                return "partial_success"  # Critical success but content failed
+                return "completed"  # Critical success, content failure is acceptable
             else:
-                return "success"  # Full success
+                return "completed"  # Full success
         elif failed_critical > 0:
             # If any critical component failed, the entire task is failed
             return "failed"
         else:
             # Only show partial_success if no critical components failed but some are still pending
-            return "partial_success"
+            return "processing"  # Still processing
 
     async def update_component_status_smart(
         self,
@@ -887,36 +894,7 @@ class LiteratureDAO:
             updated_at=literature.updated_at
         )
 
-    async def _calculate_overall_status(self, component_status) -> str:
-        """计算整体状态"""
-        if hasattr(component_status, 'metadata'):
-            # 新格式 - LiteratureComponentStatus对象
-            statuses = [
-                component_status.metadata.status,
-                component_status.content.status,
-                component_status.references.status
-            ]
-        elif isinstance(component_status, dict):
-            # 旧格式 - 字典
-            statuses = [
-                component_status.get("metadata", "pending"),
-                component_status.get("content", "pending"),
-                component_status.get("references", "pending")
-            ]
-        else:
-            return "unknown"
 
-        # 如果有任何组件失败，整体状态为失败
-        if any(status == "failed" for status in statuses):
-            return "failed"
-        # 如果所有组件成功，整体状态为完成
-        elif all(status == "success" for status in statuses):
-            return "completed"
-        # 如果有组件正在处理，整体状态为处理中
-        elif any(status == "processing" for status in statuses):
-            return "processing"
-        else:
-            return "pending"
 
     def _calculate_overall_progress_from_details(
         self, metadata: "ComponentDetail", content: "ComponentDetail", references: "ComponentDetail"

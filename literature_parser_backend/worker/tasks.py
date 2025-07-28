@@ -275,8 +275,87 @@ async def _process_literature_async(
             )
             logger.warning(f"Metadata fetch failed. Overall status: {overall_status}")
 
-        # 4. Fetch Content (Optional Component)
-        update_task_status("获取内容", progress=40)
+        # 4. Fetch References (Critical Component) - 优先处理关键组件
+        update_task_status("获取参考文献", progress=40)
+
+        # Initialize references variable to avoid UnboundLocalError
+        references = []
+        references_source = "未知来源"
+
+        # Check dependencies before proceeding
+        deps_met = await dao.check_component_dependencies(literature_id, "references")
+        if not deps_met:
+            await dao.update_enhanced_component_status(
+                literature_id=literature_id,
+                component="references",
+                status="waiting",
+                stage="等待依赖完成",
+                progress=0,
+                dependencies_met=False,
+                next_action="等待元数据获取完成",
+            )
+            logger.info("References fetch waiting for dependencies")
+        else:
+            await dao.update_enhanced_component_status(
+                literature_id=literature_id,
+                component="references",
+                status="processing",
+                stage="正在获取参考文献",
+                progress=0,
+                dependencies_met=True,
+                next_action="尝试从外部API获取参考文献",
+            )
+
+            references_fetcher = ReferencesFetcher()
+            references_result = references_fetcher.fetch_references_waterfall(
+                identifiers=identifiers.model_dump(),
+                pdf_content=pdf_content,
+            )
+
+            # Handle result tuple safely
+            if isinstance(references_result, tuple) and len(references_result) == 2:
+                references, references_raw = references_result
+                references_source = references_raw.get("source", "未知来源")
+            else:
+                references = references_result
+                references_source = "未知来源"
+
+            # Check if references fetch was actually successful with improved logic
+            if references and len(references) > 0:
+                overall_status = await dao.update_enhanced_component_status(
+                    literature_id=literature_id,
+                    component="references",
+                    status="success",
+                    stage="参考文献获取成功",
+                    progress=100,
+                    source=references_source or "未知来源",
+                    next_action=None,
+                )
+                logger.info(
+                    f"References fetch successful ({len(references)} refs) from {references_source}. Overall status: {overall_status}",
+                )
+            else:
+                # Note: References failure is now critical
+                error_info = {
+                    "error_type": "ReferencesFetchError",
+                    "error_message": "No references found or extraction failed",
+                    "error_details": {
+                        "attempted_sources": ["Semantic Scholar", "GROBID"],
+                    },
+                }
+                overall_status = await dao.update_enhanced_component_status(
+                    literature_id=literature_id,
+                    component="references",
+                    status="failed",
+                    stage="参考文献获取失败",
+                    progress=0,
+                    error_info=error_info,
+                    next_action="考虑手动输入参考文献",
+                )
+                logger.warning(f"References fetch failed. Overall status: {overall_status}")
+
+        # 5. Fetch Content (Optional Component) - 可选的异步处理
+        update_task_status("获取内容", progress=60)
         await dao.update_enhanced_component_status(
             literature_id=literature_id,
             component="content",
@@ -376,83 +455,6 @@ async def _process_literature_async(
                 next_action="可尝试手动上传PDF文件",
             )
             logger.warning(f"Content fetch failed. Overall status: {overall_status}")
-
-        # 5. Fetch References (Critical Component)
-        update_task_status("获取参考文献", progress=60)
-
-        # Check dependencies before proceeding
-        deps_met = await dao.check_component_dependencies(literature_id, "references")
-        if not deps_met:
-            await dao.update_enhanced_component_status(
-                literature_id=literature_id,
-                component="references",
-                status="waiting",
-                stage="等待依赖完成",
-                progress=0,
-                dependencies_met=False,
-                next_action="等待元数据或内容获取完成",
-            )
-            logger.info("References fetch waiting for dependencies")
-        else:
-            await dao.update_enhanced_component_status(
-                literature_id=literature_id,
-                component="references",
-                status="processing",
-                stage="正在获取参考文献",
-                progress=0,
-                dependencies_met=True,
-                next_action="尝试从外部API获取参考文献",
-            )
-
-            references_fetcher = ReferencesFetcher()
-            references_result = references_fetcher.fetch_references_waterfall(
-                identifiers=identifiers.model_dump(),
-                pdf_content=pdf_content,
-            )
-
-            # Handle result tuple safely
-            if isinstance(references_result, tuple) and len(references_result) == 2:
-                references, references_raw = references_result
-                references_source = references_raw.get("source", "未知来源")
-            else:
-                references = references_result
-                references_source = "未知来源"
-
-            # Check if references fetch was actually successful with improved logic
-            if references and len(references) > 0:
-                overall_status = await dao.update_enhanced_component_status(
-                    literature_id=literature_id,
-                    component="references",
-                    status="success",
-                    stage="参考文献获取成功",
-                    progress=100,
-                    source=references_source or "未知来源",
-                    next_action=None,
-                )
-                logger.info(
-                    f"References fetch successful ({len(references)} refs) from {references_source}. Overall status: {overall_status}",
-                )
-            else:
-                # Note: References failure is now critical
-                error_info = {
-                    "error_type": "ReferencesFetchError",
-                    "error_message": "No references found or extraction failed",
-                    "error_details": {
-                        "attempted_sources": ["Semantic Scholar", "GROBID"],
-                    },
-                }
-                overall_status = await dao.update_enhanced_component_status(
-                    literature_id=literature_id,
-                    component="references",
-                    status="failed",
-                    stage="参考文献获取失败",
-                    progress=0,
-                    error_info=error_info,
-                    next_action="考虑手动输入参考文献",
-                )
-                logger.warning(
-                    f"References fetch failed (now critical). Overall status: {overall_status}",
-                )
 
         # 6. Finalize
         update_task_status("完成任务", progress=80)

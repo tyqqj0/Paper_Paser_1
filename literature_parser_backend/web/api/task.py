@@ -89,9 +89,17 @@ class UnifiedStatusManager:
                     if active_stages:
                         current_stage = "; ".join(active_stages)
                     elif literature_status.overall_status == "completed":
-                        current_stage = "处理完成"
+                        # 区分新处理完成和重复文献
+                        if result_type == "duplicate":
+                            current_stage = "处理完成"
+                        else:
+                            current_stage = "处理完成"
                     elif literature_status.overall_status == "failed":
-                        current_stage = "处理失败"
+                        # 区分新处理失败和重复文献的历史失败状态
+                        if result_type == "duplicate":
+                            current_stage = "文献已存在（历史处理失败）"
+                        else:
+                            current_stage = "处理失败"
             except Exception as e:
                 logger.warning(f"Failed to get literature status for {literature_id}: {e}")
 

@@ -232,10 +232,10 @@ class MetadataFetcher:
             year = int(published["date-parts"][0][0])
 
         metadata = MetadataModel(
-            title=crossref_data.get("title", [None])[0] or "Unknown Title",
+            title=crossref_data.get("title") or "Unknown Title",
             authors=authors,
             year=year,
-            journal=crossref_data.get("container-title", [None])[0],
+            journal=crossref_data.get("journal"),
             abstract=crossref_data.get("abstract"),
         )
         return metadata
