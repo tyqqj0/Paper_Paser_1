@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from ..models.literature import ReferenceModel
 from ..services.grobid import GrobidClient
 from ..services.semantic_scholar import SemanticScholarClient
+from ..services.crossref import CrossRefClient
 from ..settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,7 @@ class ReferencesFetcher:
         """Initialize references fetcher with API clients."""
         self.settings = settings or Settings()
         self.semantic_scholar_client = SemanticScholarClient(settings)
+        self.crossref_client = CrossRefClient(settings)
         self.grobid_client = GrobidClient(settings)
 
     def fetch_references_waterfall(
@@ -31,7 +33,7 @@ class ReferencesFetcher:
         pdf_content: Optional[bytes] = None,
     ) -> Tuple[List[ReferenceModel], Dict[str, Any]]:
         """
-        Fetch references using waterfall: Semantic Scholar -> GROBID fallback.
+        Fetch references using waterfall: Semantic Scholar -> CrossRef -> GROBID fallback.
         """
         logger.info(f"Starting references fetch for identifiers: {identifiers}")
 
@@ -113,7 +115,36 @@ class ReferencesFetcher:
                                 f"ArXiv ID retry for references also failed: {e2}",
                             )
 
-        # 2. Fallback to GROBID if we have PDF content
+        # 2. Fallback to CrossRef if we have DOI
+        if not references and identifiers.get("doi"):
+            logger.info("Falling back to CrossRef for reference extraction.")
+            try:
+                crossref_refs = self.crossref_client.get_references(identifiers["doi"])
+                if crossref_refs:
+                    raw_data["crossref"] = crossref_refs
+                    for ref_data in crossref_refs:
+                        # 确保标题存在才创建ReferenceModel
+                        if ref_data.get("title"):
+                            # 生成原始文本
+                            raw_text = self._generate_raw_text_from_crossref(ref_data)
+                            references.append(
+                                ReferenceModel(
+                                    raw_text=raw_text,
+                                    parsed=ref_data,
+                                    source="crossref",
+                                ),
+                            )
+                    logger.info(
+                        f"✅ Successfully fetched {len(references)} references from CrossRef.",
+                    )
+                    if references:
+                        return references, raw_data
+            except Exception as e:
+                logger.warning(
+                    f"CrossRef API for references failed: {e}. Will try GROBID fallback.",
+                )
+
+        # 3. Fallback to GROBID if we have PDF content
         if not references and pdf_content:
             logger.info("Falling back to GROBID for reference extraction from PDF.")
             try:
@@ -164,3 +195,47 @@ class ReferencesFetcher:
             return match3.group(1)
 
         return None
+
+    def _generate_raw_text_from_crossref(self, ref_data: Dict[str, Any]) -> str:
+        """
+        从CrossRef参考文献数据生成原始文本格式
+
+        Args:
+            ref_data: CrossRef参考文献数据
+
+        Returns:
+            str: 格式化的原始参考文献文本
+        """
+        parts = []
+
+        # 作者
+        if ref_data.get("authors"):
+            author_names = [author["full_name"] for author in ref_data["authors"]]
+            if len(author_names) > 3:
+                # 如果作者太多，只显示前3个加"et al."
+                authors_str = ", ".join(author_names[:3]) + ", et al."
+            else:
+                authors_str = ", ".join(author_names)
+            parts.append(authors_str)
+
+        # 标题
+        if ref_data.get("title"):
+            parts.append(f'"{ref_data["title"]}"')
+
+        # 期刊/会议
+        if ref_data.get("venue"):
+            parts.append(ref_data["venue"])
+
+        # 年份
+        if ref_data.get("year"):
+            parts.append(f"({ref_data['year']})")
+
+        # 页码
+        if ref_data.get("pages"):
+            parts.append(f"pp. {ref_data['pages']}")
+
+        # DOI
+        if ref_data.get("doi"):
+            parts.append(f"DOI: {ref_data['doi']}")
+
+        return ". ".join(parts) + "."
