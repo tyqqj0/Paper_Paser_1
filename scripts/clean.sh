@@ -1,0 +1,1 @@
+sudo docker exec -it paper_paser_1-worker-1 python3 /app/cleanup_failed_literature.py
