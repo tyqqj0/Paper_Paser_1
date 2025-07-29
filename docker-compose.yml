@@ -28,7 +28,7 @@ services:
     restart: always
     env_file:
       - .env
-    command: poetry run celery -A literature_parser_backend.worker.celery_app worker --loglevel=info --concurrency=2 --queues=literature
+    command: poetry run celery -A literature_parser_backend.worker.celery_app worker --loglevel=info --concurrency=8 --queues=literature
     depends_on:
       db:
         condition: service_healthy
