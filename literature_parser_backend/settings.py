@@ -97,9 +97,9 @@ class Settings(BaseSettings):
     upload_allowed_extensions: list[str] = [".pdf"]  # 允许的文件扩展名
     upload_presigned_url_expires: int = 3600  # 预签名URL过期时间(秒)，默认1小时
     celery_task_track_started: bool = True
-    celery_task_time_limit: int = 30 * 60  # 30 minutes
-    celery_task_soft_time_limit: int = 25 * 60  # 25 minutes
-    celery_worker_prefetch_multiplier: int = 1
+    celery_task_time_limit: int = 35 * 60  # 35 minutes (增加5分钟缓冲)
+    celery_task_soft_time_limit: int = 30 * 60  # 30 minutes (增加5分钟缓冲)
+    celery_worker_prefetch_multiplier: int = 2  # 每个worker预取2个任务提高效率
 
     @property
     def db_url(self) -> URL:
