@@ -1,9 +1,11 @@
-"""Literature processing API endpoints."""
+"""Literature processing API endpoints with SSE support."""
 
-from typing import Any, Dict
+import asyncio
+import json
+from typing import Any, Dict, Union
 
 from fastapi import APIRouter, HTTPException, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from loguru import logger
 
 from literature_parser_backend.db.dao import LiteratureDAO
@@ -14,8 +16,117 @@ from literature_parser_backend.models.literature import (
     LiteratureSummaryDTO,
 )
 from literature_parser_backend.worker.tasks import process_literature_task
+from literature_parser_backend.web.api.task import UnifiedStatusManager
 
 router = APIRouter(prefix="/literature", tags=["文献处理"])
+
+
+async def task_status_stream(task_id: str):
+    """
+    任务状态SSE事件流生成器
+
+    持续监控任务状态变化，只在状态改变时推送事件。
+    任务完成时推送literature_id并结束流。
+    """
+    manager = UnifiedStatusManager()
+    last_status_hash = None
+
+    logger.info(f"Starting SSE stream for task: {task_id}")
+
+    try:
+        while True:
+            # 获取当前任务状态
+            current_status = await manager.get_unified_status(task_id)
+
+            # 计算状态哈希，只在变化时推送
+            status_dict = current_status.model_dump()
+            current_hash = hash(str(status_dict))
+
+            if current_hash != last_status_hash:
+                # 推送状态更新事件
+                logger.debug(f"Task {task_id} status changed, pushing update")
+                yield f"event: status\n"
+                yield f"data: {current_status.model_dump_json()}\n\n"
+                last_status_hash = current_hash
+
+            # 检查URL验证错误
+            if current_status.url_validation_status == "failed":
+                url_error_data = {
+                    "event": "url_validation_failed",
+                    "error_type": "URLValidationError",
+                    "error": current_status.url_validation_error,
+                    "original_url": current_status.original_url,
+                    "task_id": task_id
+                }
+                logger.warning(f"Task {task_id} URL validation failed: {current_status.url_validation_error}")
+                yield f"event: error\n"
+                yield f"data: {json.dumps(url_error_data)}\n\n"
+
+            # 检查组件级错误
+            if current_status.literature_status:
+                component_status = current_status.literature_status.component_status
+                for comp_name in ['metadata', 'content', 'references']:
+                    comp_detail = getattr(component_status, comp_name, None)
+                    if comp_detail and comp_detail.status.value == "failed" and comp_detail.error_info:
+                        comp_error_data = {
+                            "event": "component_failed",
+                            "component": comp_name,
+                            "error_type": comp_detail.error_info.get("error_type", "UnknownError"),
+                            "error": comp_detail.error_info.get("error_message", "组件处理失败"),
+                            "error_details": comp_detail.error_info,
+                            "task_id": task_id
+                        }
+                        logger.warning(f"Task {task_id} component {comp_name} failed: {comp_detail.error_info}")
+                        yield f"event: error\n"
+                        yield f"data: {json.dumps(comp_error_data)}\n\n"
+
+            # 检查任务是否完成
+            if current_status.execution_status.value in ["completed", "failed"]:
+                if current_status.execution_status.value == "completed":
+                    # 推送完成事件，包含literature_id
+                    completion_data = {
+                        "event": "completed",
+                        "literature_id": current_status.literature_id,
+                        "resource_url": f"/api/literature/{current_status.literature_id}"
+                    }
+                    logger.info(f"Task {task_id} completed, literature_id: {current_status.literature_id}")
+                    yield f"event: completed\n"
+                    yield f"data: {json.dumps(completion_data)}\n\n"
+                else:
+                    # 推送失败事件，包含详细错误信息
+                    error_data = {
+                        "event": "failed",
+                        "error": "任务处理失败",
+                        "task_id": task_id
+                    }
+
+                    # 如果有URL验证错误，添加到失败事件中
+                    if current_status.url_validation_error:
+                        error_data["error_type"] = "URLValidationError"
+                        error_data["error"] = current_status.url_validation_error
+                        error_data["original_url"] = current_status.original_url
+
+                    logger.warning(f"Task {task_id} failed: {error_data}")
+                    yield f"event: failed\n"
+                    yield f"data: {json.dumps(error_data)}\n\n"
+
+                # 任务结束，关闭流
+                logger.info(f"Ending SSE stream for task: {task_id}")
+                break
+
+            # 等待1秒后再次检查状态
+            await asyncio.sleep(1)
+
+    except Exception as e:
+        # 推送错误事件
+        error_data = {
+            "event": "error",
+            "error": str(e),
+            "task_id": task_id
+        }
+        logger.error(f"SSE stream error for task {task_id}: {e}")
+        yield f"event: error\n"
+        yield f"data: {json.dumps(error_data)}\n\n"
 
 
 def _extract_convenience_fields(literature: LiteratureModel) -> Dict[str, Any]:
@@ -30,6 +141,7 @@ def _extract_convenience_fields(literature: LiteratureModel) -> Dict[str, Any]:
         "year": None,
         "journal": None,
         "doi": None,
+        "abstract": None,
     }
 
     # 从identifiers提取DOI
@@ -49,6 +161,9 @@ def _extract_convenience_fields(literature: LiteratureModel) -> Dict[str, Any]:
 
         if metadata_dict.get("journal"):
             convenience_data["journal"] = metadata_dict["journal"]
+
+        if metadata_dict.get("abstract"):
+            convenience_data["abstract"] = metadata_dict["abstract"]
 
         # 处理作者数据
         if metadata_dict.get("authors"):
@@ -198,6 +313,61 @@ async def create_literature(
         )
 
 
+@router.post("/stream", summary="Submit literature with SSE")
+async def create_literature_stream(
+    literature_data: LiteratureCreateRequestDTO,
+) -> StreamingResponse:
+    """
+    提交文献处理并返回SSE连接
+
+    这个端点会立即返回一个SSE连接，通过该连接实时推送任务状态更新。
+    当任务完成时，会推送包含literature_id的完成事件。
+
+    Args:
+        literature_data: 文献创建请求数据
+
+    Returns:
+        SSE流响应，包含任务状态更新和完成事件
+    """
+    try:
+        effective_values = literature_data.get_effective_values()
+
+        if not any(
+            key in effective_values
+            for key in ["doi", "arxiv_id", "url", "pdf_url", "title"]
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="At least one identifier must be provided.",
+            )
+
+        logger.info(f"Received SSE submission, creating task with data: {effective_values}")
+
+        # 创建异步任务
+        task = process_literature_task.delay(effective_values)
+        logger.info(f"Task {task.id} created for SSE processing.")
+
+        # 返回SSE流
+        return StreamingResponse(
+            task_status_stream(task.id),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",  # Nginx优化
+                "Access-Control-Allow-Origin": "*",  # CORS支持
+                "Access-Control-Allow-Headers": "Cache-Control",
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error creating SSE literature stream: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal Server Error.",
+        )
+
+
 @router.get("/{literature_id}", summary="Get literature summary")
 async def get_literature_summary(literature_id: str) -> LiteratureSummaryDTO:
     """
@@ -254,6 +424,7 @@ async def get_literature_summary(literature_id: str) -> LiteratureSummaryDTO:
             year=convenience_data["year"],
             journal=convenience_data["journal"],
             doi=convenience_data["doi"],
+            abstract=convenience_data["abstract"],
         )
 
         logger.info(f"获取文献摘要成功: {literature_id}")

@@ -426,6 +426,7 @@ class LiteratureSummaryDTO(BaseModel):
     year: Optional[int] = None
     journal: Optional[str] = None
     doi: Optional[str] = None
+    abstract: Optional[str] = None
 
     def model_post_init(self, __context: Any) -> None:
         """
@@ -437,6 +438,7 @@ class LiteratureSummaryDTO(BaseModel):
             self.title = self.metadata.title
             self.year = self.metadata.year
             self.journal = self.metadata.journal
+            self.abstract = self.metadata.abstract
             if self.metadata.authors:
                 self.authors = [author.name for author in self.metadata.authors]
 

@@ -12,6 +12,7 @@ from ..models.literature import AuthorModel, MetadataModel
 from ..services.crossref import CrossRefClient
 from ..services.grobid import GrobidClient
 from ..services.semantic_scholar import SemanticScholarClient
+from ..services.arxiv_api import ArXivAPIClient
 from ..settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -24,7 +25,9 @@ class MetadataFetcher:
     Tries different data sources in priority order:
     1. CrossRef API (for DOI-based lookups)
     2. Semantic Scholar API (for ArXiv and general search)
-    3. GROBID (as fallback for PDF parsing)
+    3. arXiv Official API (for ArXiv papers)
+    4. GROBID (as fallback for PDF parsing)
+    5. Source data fallback
     """
 
     def __init__(self, settings: Optional[Settings] = None):
@@ -32,6 +35,7 @@ class MetadataFetcher:
         self.settings = settings or Settings()
         self.crossref_client = CrossRefClient(self.settings)
         self.semantic_scholar_client = SemanticScholarClient(self.settings)
+        self.arxiv_client = ArXivAPIClient(self.settings)
 
     def fetch_metadata_waterfall(
         self,
@@ -147,7 +151,56 @@ class MetadataFetcher:
                         except Exception as e2:
                             logger.warning(f"ArXiv ID retry also failed: {e2}")
 
-        # 4. Fallback to GROBID if we have PDF content
+        # 4. Try arXiv Official API if we have an arXiv ID (either no metadata or incomplete metadata)
+        if identifiers.get("arxiv_id"):
+            # Check if we need arXiv API (no metadata OR incomplete metadata)
+            has_metadata = metadata is not None
+            has_abstract = metadata and metadata.abstract and len(metadata.abstract.strip()) > 0
+            has_good_title = metadata and metadata.title and not metadata.title.startswith("Processing")
+
+            needs_arxiv_api = (
+                not has_metadata or  # No metadata at all
+                not has_abstract or  # Missing abstract
+                not has_good_title   # Poor title quality
+            )
+
+            logger.info(f"arXiv API quality check: has_metadata={has_metadata}, has_abstract={has_abstract}, has_good_title={has_good_title}, needs_arxiv_api={needs_arxiv_api}")
+
+            if needs_arxiv_api:
+                logger.info("Attempting arXiv Official API lookup...")
+                try:
+                    arxiv_data = self.arxiv_client.get_metadata(identifiers["arxiv_id"])
+                    if arxiv_data:
+                        arxiv_metadata = self.arxiv_client.convert_to_metadata_model(arxiv_data)
+
+                        # If we have no metadata, use arXiv metadata directly
+                        if not metadata:
+                            metadata = arxiv_metadata
+                            raw_data["arxiv_api"] = arxiv_data
+                            source_priority.append("arXiv Official API")
+                            logger.info("✅ Successfully fetched metadata from arXiv Official API")
+                        else:
+                            # Merge/enhance existing metadata with arXiv data
+                            if not metadata.abstract and arxiv_metadata.abstract:
+                                metadata.abstract = arxiv_metadata.abstract
+                                logger.info("✅ Enhanced metadata with abstract from arXiv Official API")
+
+                            if not metadata.title or metadata.title.startswith("Processing:"):
+                                if arxiv_metadata.title:
+                                    metadata.title = arxiv_metadata.title
+                                    logger.info("✅ Enhanced metadata with title from arXiv Official API")
+
+                            # Always add arXiv data to raw_data for reference
+                            raw_data["arxiv_api"] = arxiv_data
+                            source_priority.append("arXiv Official API (enhancement)")
+                    else:
+                        logger.info("❌ No metadata found in arXiv Official API")
+                except Exception as e:
+                    logger.warning(f"arXiv Official API lookup failed: {e}")
+            else:
+                logger.info("Skipping arXiv Official API - metadata is complete")
+
+        # 5. Fallback to GROBID if we have PDF content
         if not metadata and pdf_content:
             logger.info("Attempting metadata extraction from PDF using GROBID.")
             try:
@@ -163,7 +216,7 @@ class MetadataFetcher:
             except Exception as e:
                 logger.warning(f"GROBID metadata extraction failed: {e}")
 
-        # 5. Fallback to source data if all else fails
+        # 6. Fallback to source data if all else fails
         if not metadata:
             logger.info("All API lookups failed, creating metadata from source data...")
             metadata = self._create_fallback_metadata(source_data)
