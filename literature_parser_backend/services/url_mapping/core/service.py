@@ -7,7 +7,7 @@ URL映射服务
 import asyncio
 import logging
 import requests
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from .base import URLAdapter
 from .result import URLMappingResult
@@ -104,6 +104,24 @@ class URLMappingService:
             logger.error(f"❌ URL验证未知错误: {e}, URL: {url}")
             return False
 
+    def _check_pdf_redirect(self, url: str) -> Optional[Dict[str, Any]]:
+        """
+        检查PDF重定向
+
+        Args:
+            url: 要检查的URL
+
+        Returns:
+            重定向信息字典，如果不需要重定向则返回None
+        """
+        try:
+            from .pdf_redirector import get_pdf_redirector
+            redirector = get_pdf_redirector()
+            return redirector.check_redirect(url)
+        except Exception as e:
+            logger.warning(f"PDF重定向检查失败: {e}")
+            return None
+
     async def map_url(self, url: str, enable_validation: bool = False, strict_validation: bool = False, skip_url_validation: bool = False) -> URLMappingResult:
         """
         将URL映射为标识符和相关信息（异步版本）
@@ -118,8 +136,16 @@ class URLMappingService:
             URLMappingResult: 映射结果
         """
         logger.debug(f"开始映射URL: {url}")
+        original_url = url
 
-        # URL有效性验证
+        # 1. PDF智能重定向检查
+        redirect_info = self._check_pdf_redirect(url)
+        if redirect_info:
+            logger.info(f"🔄 PDF重定向: {url} → {redirect_info['canonical_url']}")
+            logger.info(f"📝 重定向原因: {redirect_info['redirect_reason']}")
+            url = redirect_info['canonical_url']  # 使用重定向后的URL继续处理
+
+        # 2. URL有效性验证
         if self.enable_url_validation and not skip_url_validation:
             logger.info(f"🔍 验证URL有效性: {url}")
             if not self._validate_url(url):
@@ -127,23 +153,36 @@ class URLMappingService:
                 result = URLMappingResult()
                 result.metadata['url_validation_failed'] = True
                 result.metadata['error'] = f"URL {url} 无法访问或不存在"
+                # 如果有重定向信息，也要记录
+                if redirect_info:
+                    result.original_url = original_url
+                    result.canonical_url = redirect_info['canonical_url']
+                    result.redirect_reason = redirect_info['redirect_reason']
                 return result
             else:
                 logger.info(f"✅ URL验证通过: {url}")
 
-        # 分离专门适配器和通用适配器
+        # 3. 分离专门适配器和通用适配器
         specialized_adapters = [a for a in self.adapters if a.name != "generic"]
         generic_adapters = [a for a in self.adapters if a.name == "generic"]
 
-        # 首先尝试专门适配器
+        # 4. 首先尝试专门适配器
         for adapter in specialized_adapters:
             if adapter.can_handle(url):
                 logger.debug(f"使用专门适配器 {adapter.name} 处理URL")
                 try:
                     result = await adapter.extract_identifiers(url, enable_validation, strict_validation)
-                    
+
                     if result and result.is_successful():
+                        # 如果有重定向信息，添加到结果中
+                        if redirect_info:
+                            result.original_url = original_url
+                            result.canonical_url = redirect_info['canonical_url']
+                            result.redirect_reason = redirect_info['redirect_reason']
+
                         logger.info(f"成功映射URL: {url} -> DOI:{result.doi}, ArXiv:{result.arxiv_id}, Venue:{result.venue}, 策略:{result.strategy_used}")
+                        if redirect_info:
+                            logger.info(f"🔄 包含重定向信息: {original_url} → {redirect_info['canonical_url']}")
                         return result
                     else:
                         logger.debug(f"适配器 {adapter.name} 未找到有效标识符或有用信息")
@@ -151,16 +190,24 @@ class URLMappingService:
                     logger.warning(f"适配器 {adapter.name} 处理URL失败: {e}")
                     continue
 
-        # 如果专门适配器都失败，尝试通用适配器作为备选方案
+        # 5. 如果专门适配器都失败，尝试通用适配器作为备选方案
         if generic_adapters:
             logger.debug(f"专门适配器都失败，尝试通用备选方案")
             for adapter in generic_adapters:
                 logger.debug(f"使用通用适配器 {adapter.name} 处理URL")
                 try:
                     result = await adapter.extract_identifiers(url, enable_validation, strict_validation)
-                    
+
                     if result and result.is_successful():
+                        # 如果有重定向信息，添加到结果中
+                        if redirect_info:
+                            result.original_url = original_url
+                            result.canonical_url = redirect_info['canonical_url']
+                            result.redirect_reason = redirect_info['redirect_reason']
+
                         logger.info(f"通用适配器成功映射URL: {url} -> DOI:{result.doi}, ArXiv:{result.arxiv_id}, Venue:{result.venue}, 策略:{result.strategy_used}")
+                        if redirect_info:
+                            logger.info(f"🔄 包含重定向信息: {original_url} → {redirect_info['canonical_url']}")
                         return result
                     else:
                         logger.debug(f"通用适配器 {adapter.name} 未找到有效标识符或有用信息")
@@ -168,9 +215,15 @@ class URLMappingService:
                     logger.warning(f"通用适配器 {adapter.name} 处理URL失败: {e}")
                     continue
 
-        # 如果所有适配器都失败，返回空结果
+        # 6. 如果所有适配器都失败，返回空结果（但保留重定向信息）
         logger.debug(f"所有适配器都无法处理URL: {url}")
-        return URLMappingResult()
+        result = URLMappingResult()
+        if redirect_info:
+            result.original_url = original_url
+            result.canonical_url = redirect_info['canonical_url']
+            result.redirect_reason = redirect_info['redirect_reason']
+            logger.debug(f"返回空结果但保留重定向信息: {original_url} → {redirect_info['canonical_url']}")
+        return result
 
     def map_url_sync(self, url: str) -> URLMappingResult:
         """
@@ -183,18 +236,34 @@ class URLMappingService:
             URLMappingResult: 映射结果
         """
         try:
-            # 获取或创建事件循环
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            # 如果没有事件循环，创建一个新的
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-        try:
-            return loop.run_until_complete(self.map_url(url))
+            # 检查是否已经有运行中的事件循环
+            try:
+                loop = asyncio.get_running_loop()
+                # 如果有运行中的事件循环，使用线程池执行
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(self._run_async_in_new_loop, url)
+                    return future.result()
+            except RuntimeError:
+                # 没有运行中的事件循环，可以安全使用run_until_complete
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    return loop.run_until_complete(self.map_url(url))
+                finally:
+                    loop.close()
         except Exception as e:
             logger.error(f"同步URL映射失败: {e}")
             return URLMappingResult()
+
+    def _run_async_in_new_loop(self, url: str) -> URLMappingResult:
+        """在新的事件循环中运行异步方法"""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(self.map_url(url))
+        finally:
+            loop.close()
 
     def map_url_with_validation(self, url: str, strict: bool = False) -> URLMappingResult:
         """

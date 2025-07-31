@@ -29,7 +29,12 @@ class URLMappingResult:
     # URL信息
     source_page_url: Optional[str] = None
     pdf_url: Optional[str] = None
-    
+
+    # PDF重定向信息
+    canonical_url: Optional[str] = None  # 建议的标准URL
+    original_url: Optional[str] = None   # 原始URL
+    redirect_reason: Optional[str] = None # 重定向原因
+
     # 处理信息
     source_adapter: Optional[str] = None
     strategy_used: Optional[str] = None
@@ -46,10 +51,11 @@ class URLMappingResult:
     def has_useful_info(self) -> bool:
         """检查是否有有用的信息"""
         return bool(
-            self.venue or 
-            self.source_page_url or 
-            self.pdf_url or 
-            self.title
+            self.venue or
+            self.source_page_url or
+            self.pdf_url or
+            self.title or
+            self.canonical_url
         )
     
     def is_successful(self) -> bool:
@@ -67,9 +73,16 @@ class URLMappingResult:
             "title": self.title,
             "source_page_url": self.source_page_url,
             "pdf_url": self.pdf_url,
+            "canonical_url": self.canonical_url,
+            "original_url": self.original_url,
+            "redirect_reason": self.redirect_reason,
             "source_adapter": self.source_adapter,
             "strategy_used": self.strategy_used,
             "confidence": self.confidence,
             "identifiers": self.identifiers,
             "metadata": self.metadata,
         }
+
+    def should_use_canonical(self) -> bool:
+        """检查是否应该使用标准URL"""
+        return self.canonical_url is not None

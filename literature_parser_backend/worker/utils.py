@@ -79,10 +79,10 @@ def extract_authoritative_identifiers(
                 logger.warning(f"URL验证失败: {source['url']}")
                 raise ValueError(f"URL验证失败: {url_validation_info['error']}")
 
-            # URL验证成功，继续使用旧版本的URL映射服务
-            from ..services.url_mapper import get_url_mapping_service as get_old_service
-            old_url_service = get_old_service()
-            mapping_result = old_url_service.map_url_sync(source["url"])
+            # URL验证成功，使用新版本的URL映射服务（支持PDF重定向）
+            from ..services.url_mapping import get_url_mapping_service
+            url_service = get_url_mapping_service(enable_url_validation=False)  # 已经验证过了
+            mapping_result = url_service.map_url_sync(source["url"])
 
             # 记录URL验证成功信息
             url_validation_info = {
