@@ -46,9 +46,12 @@ def extract_authoritative_identifiers(
 ) -> Tuple[IdentifiersModel, str, Optional[Dict[str, Any]]]:
     """
     Extract authoritative identifiers from source data.
-    Priority: DOI > ArXiv ID > Other academic IDs > Generated fingerprint
+    Priority: DOI > ArXiv ID > URL mapping > Generated fingerprint
 
-    Enhanced with URL mapping service for better URL support.
+    优化策略：
+    1. 优先使用直接提供的DOI/ArXiv ID（最可靠）
+    2. 如果没有直接标识符，再尝试URL映射
+    3. 对于已知问题域名（如Semantic Scholar），跳过URL验证
 
     Returns:
         Tuple of (identifiers, primary_type, url_validation_info)
@@ -57,51 +60,86 @@ def extract_authoritative_identifiers(
     primary_type = None
     url_validation_info = None
 
-    # 首先尝试使用URL映射服务（新功能）
+    # 🎯 优先级1：直接提供的DOI（最可靠）
+    if source.get("doi"):
+        identifiers.doi = source["doi"]
+        primary_type = "doi"
+        logger.info(f"✅ 使用直接提供的DOI: {identifiers.doi}")
+        return identifiers, primary_type, url_validation_info
+
+    # 🎯 优先级2：直接提供的ArXiv ID
+    if source.get("arxiv_id"):
+        identifiers.arxiv_id = source["arxiv_id"]
+        primary_type = "arxiv"
+        logger.info(f"✅ 使用直接提供的ArXiv ID: {identifiers.arxiv_id}")
+        return identifiers, primary_type, url_validation_info
+
+    # 🎯 优先级3：URL映射服务（如果没有直接标识符）
     if source.get("url"):
         try:
-            # 先进行URL验证
-            from ..services.url_mapping.core.service import URLMappingService
-            temp_service = URLMappingService(enable_url_validation=True)
+            # 检查是否为已知问题域名，跳过URL验证
+            problematic_domains = [
+                'semanticscholar.org',
+                'scholar.google.com',
+                'researchgate.net',
+                # 可以根据需要添加更多域名
+            ]
 
-            # 直接使用URL验证功能
-            if not temp_service._validate_url(source["url"]):
-                # URL验证失败，记录详细信息并抛出异常
+            skip_validation = any(domain in source["url"].lower() for domain in problematic_domains)
+
+            if skip_validation:
+                logger.info(f"🔄 跳过URL验证（已知问题域名）: {source['url']}")
                 url_validation_info = {
-                    "status": "failed",
-                    "error": f"URL {source['url']} 无法访问或不存在",
+                    "status": "skipped",
+                    "reason": "known_problematic_domain",
                     "original_url": source["url"],
                     "validation_details": {
-                        "error_type": "url_not_accessible",
+                        "skip_reason": "domain_has_anti_bot_protection",
                         "validation_time": datetime.now().isoformat(),
                     }
                 }
-                logger.warning(f"URL验证失败: {source['url']}")
-                raise ValueError(f"URL验证失败: {url_validation_info['error']}")
+            else:
+                # 对其他域名进行URL验证
+                from ..services.url_mapping.core.service import URLMappingService
+                temp_service = URLMappingService(enable_url_validation=True)
 
-            # URL验证成功，使用新版本的URL映射服务（支持PDF重定向）
+                # 直接使用URL验证功能
+                if not temp_service._validate_url(source["url"]):
+                    # URL验证失败，记录详细信息并抛出异常
+                    url_validation_info = {
+                        "status": "failed",
+                        "error": f"URL {source['url']} 无法访问或不存在",
+                        "original_url": source["url"],
+                        "validation_details": {
+                            "error_type": "url_not_accessible",
+                            "validation_time": datetime.now().isoformat(),
+                        }
+                    }
+                    logger.warning(f"URL验证失败: {source['url']}")
+                    raise ValueError(f"URL验证失败: {url_validation_info['error']}")
+                else:
+                    url_validation_info = {
+                        "status": "success",
+                        "original_url": source["url"],
+                        "validation_details": {
+                            "validation_time": datetime.now().isoformat(),
+                        }
+                    }
+
+            # 使用新版本的URL映射服务（支持PDF重定向）
             from ..services.url_mapping import get_url_mapping_service
-            url_service = get_url_mapping_service(enable_url_validation=False)  # 已经验证过了
+            url_service = get_url_mapping_service(enable_url_validation=False)  # 验证已处理或跳过
             mapping_result = url_service.map_url_sync(source["url"])
 
-            # 记录URL验证成功信息
-            url_validation_info = {
-                "status": "success",
-                "original_url": source["url"],
-                "validation_details": {
-                    "validation_time": datetime.now().isoformat(),
-                }
-            }
-
-            # URL验证已经在上面完成，这里直接处理映射结果
-
+            # 处理映射结果
             if mapping_result.doi:
                 identifiers.doi = mapping_result.doi
                 primary_type = "doi"
+                logger.info(f"✅ URL映射提取到DOI: {identifiers.doi}")
             elif mapping_result.arxiv_id:
                 identifiers.arxiv_id = mapping_result.arxiv_id
-                if not primary_type:
-                    primary_type = "arxiv"
+                primary_type = "arxiv"
+                logger.info(f"✅ URL映射提取到ArXiv ID: {identifiers.arxiv_id}")
 
             # 如果URL映射服务找到了标识符，直接返回
             if identifiers.doi or identifiers.arxiv_id:
@@ -126,27 +164,23 @@ def extract_authoritative_identifiers(
                     }
                 }
 
-    # 传统方法作为备用（保持向后兼容）
-    # Extract DOI
+    # 🎯 优先级4：传统方法作为备用（保持向后兼容）
+    logger.info("🔄 使用传统方法提取标识符")
+
+    # 从URL中提取DOI
     doi_pattern = r"10\.\d{4,}/[^\s]+"
     if source.get("url") and "doi.org" in source["url"]:
         if match := re.search(doi_pattern, source["url"]):
             identifiers.doi = match.group()
             primary_type = "doi"
-    if not identifiers.doi and source.get("doi"):
-        identifiers.doi = source["doi"]
-        primary_type = "doi"
+            logger.info(f"✅ 传统方法从URL提取到DOI: {identifiers.doi}")
 
-    # Extract ArXiv ID
-    if source.get("url") and "arxiv.org" in source["url"]:
+    # 从URL中提取ArXiv ID
+    if not identifiers.doi and source.get("url") and "arxiv.org" in source["url"]:
         if match := re.search(r"arxiv\.org/(?:abs|pdf)/([^/?]+)", source["url"]):
             identifiers.arxiv_id = match.group(1).replace(".pdf", "")
-            if not primary_type:
-                primary_type = "arxiv"
-    if not identifiers.arxiv_id and source.get("arxiv_id"):
-        identifiers.arxiv_id = source["arxiv_id"]
-        if not primary_type:
             primary_type = "arxiv"
+            logger.info(f"✅ 传统方法从URL提取到ArXiv ID: {identifiers.arxiv_id}")
 
     return identifiers, primary_type or "unknown", url_validation_info
 

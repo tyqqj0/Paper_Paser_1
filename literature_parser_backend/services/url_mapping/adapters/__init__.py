@@ -14,6 +14,7 @@ from .acm import ACMAdapter
 from .science import ScienceAdapter
 from .springer import SpringerAdapter
 from .cell import CellAdapter
+from .semantic_scholar import SemanticScholarAdapter
 from .generic import GenericAdapter
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "ScienceAdapter",
     "SpringerAdapter",
     "CellAdapter",
+    "SemanticScholarAdapter",
     "GenericAdapter",
 ]
 
@@ -42,6 +44,7 @@ ADAPTER_REGISTRY = {
     "science": ScienceAdapter,
     "springer": SpringerAdapter,
     "cell": CellAdapter,
+    "semantic_scholar": SemanticScholarAdapter,
     "generic": GenericAdapter,
 }
 

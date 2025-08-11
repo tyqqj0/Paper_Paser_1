@@ -406,7 +406,7 @@ class URLMappingService:
 _url_mapping_service = None
 
 
-def get_url_mapping_service(enable_url_validation: bool = True) -> URLMappingService:
+def get_url_mapping_service(enable_url_validation: bool = False) -> URLMappingService:
     """
     获取URL映射服务的单例实例
 

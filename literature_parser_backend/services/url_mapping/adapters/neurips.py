@@ -48,6 +48,7 @@ class NeurIPSAdapter(URLAdapter):
         # NeurIPS正则策略
         neurips_patterns = {
             "neurips_paper": r"(?:proceedings\.neurips\.cc|papers\.nips\.cc)/paper/(\d{4})/(?:file|hash)/([^/]+)-(?:Paper\.pdf|Abstract\.html)",
+            "neurips_hash": r"(?:proceedings\.neurips\.cc|papers\.nips\.cc)/paper/(\d{4})/hash/([^/]+)-Abstract\.html",
         }
 
         self.strategies = [
