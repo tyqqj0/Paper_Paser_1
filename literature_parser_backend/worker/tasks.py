@@ -25,6 +25,9 @@ from ..models.task import (
     TaskResultType,
 )
 from ..services import GrobidClient
+from ..services.lid_generator import LIDGenerator
+from ..db.alias_dao import AliasDAO
+from ..models.alias import AliasType, extract_aliases_from_source
 from .celery_app import celery_app
 from .content_fetcher import ContentFetcher
 from .deduplication import WaterfallDeduplicator
@@ -225,6 +228,90 @@ async def _deduplicate_literature(
     return None, prefetched_metadata, pdf_content
 
 
+async def _record_alias_mappings(
+    literature: LiteratureModel,
+    source_data: Dict[str, Any],
+    dao: LiteratureDAO,
+    task_id: str
+) -> None:
+    """
+    Record alias mappings for a successfully created literature.
+    
+    This function creates mappings between external identifiers and the LID,
+    enabling fast future lookups without requiring full processing.
+    
+    Args:
+        literature: The created literature model
+        source_data: Original source data from the request
+        dao: Database access object
+        task_id: Current task ID
+    """
+    try:
+        if not literature.lid:
+            logger.warning(f"Task {task_id}: No LID found in literature, skipping alias mapping")
+            return
+        
+        # Create alias DAO from same database connection
+        alias_dao = AliasDAO.create_from_task_connection(dao.collection.database)
+        
+        # Extract aliases from source data
+        source_aliases = extract_aliases_from_source(source_data)
+        logger.info(f"Task {task_id}: Found {len(source_aliases)} source aliases to map")
+        
+        # Add aliases from parsed identifiers
+        literature_aliases = {}
+        
+        if literature.identifiers.doi:
+            literature_aliases[AliasType.DOI] = literature.identifiers.doi
+        
+        if literature.identifiers.arxiv_id:
+            literature_aliases[AliasType.ARXIV] = literature.identifiers.arxiv_id
+            
+        if literature.identifiers.pmid:
+            literature_aliases[AliasType.PMID] = literature.identifiers.pmid
+        
+        # Add content URLs if available
+        if literature.content.pdf_url:
+            literature_aliases[AliasType.PDF_URL] = literature.content.pdf_url
+            
+        if literature.content.source_page_url:
+            literature_aliases[AliasType.SOURCE_PAGE] = literature.content.source_page_url
+        
+        # Add title if available (for title-based lookups)
+        if literature.metadata.title:
+            literature_aliases[AliasType.TITLE] = literature.metadata.title
+        
+        # Combine all aliases
+        all_aliases = {**source_aliases, **literature_aliases}
+        logger.info(f"Task {task_id}: Total {len(all_aliases)} aliases to create for LID {literature.lid}")
+        
+        # Batch create all mappings
+        if all_aliases:
+            created_ids = await alias_dao.batch_create_mappings(
+                lid=literature.lid,
+                mappings=all_aliases,
+                confidence=1.0,
+                metadata={
+                    "source": "literature_creation",
+                    "task_id": task_id,
+                    "created_from": "automatic_mapping"
+                }
+            )
+            
+            logger.info(
+                f"Task {task_id}: Successfully created {len(created_ids)} alias mappings for LID {literature.lid}"
+            )
+        else:
+            logger.warning(f"Task {task_id}: No aliases found to create for LID {literature.lid}")
+            
+    except Exception as e:
+        # Don't fail the entire task if alias creation fails
+        logger.error(
+            f"Task {task_id}: Failed to create alias mappings for LID {literature.lid if literature else 'unknown'}: {e}",
+            exc_info=True
+        )
+
+
 async def _process_literature_async(
     task_id: str,
     source: Dict[str, Any],
@@ -291,8 +378,69 @@ async def _process_literature_async(
                 raise e
 
         if existing_id:
+            task_manager.update_task_progress("文献已存在，检查新别名", 90, existing_id)
+            
+            # Check and record any new alias mappings for existing literature
+            try:
+                existing_literature = await dao.get_literature_by_id(existing_id)
+                if existing_literature and existing_literature.lid:
+                    # Create alias DAO
+                    alias_dao = AliasDAO.create_from_task_connection(database)
+                    
+                    # Extract aliases from current source data
+                    source_aliases = extract_aliases_from_source(source)
+                    
+                    # Check which aliases are new
+                    new_mappings = {}
+                    for alias_type, alias_value in source_aliases.items():
+                        # Check if this alias already exists
+                        existing_lid = await alias_dao._lookup_single_alias(alias_type, alias_value)
+                        if not existing_lid:
+                            # This is a new alias for the existing literature
+                            new_mappings[alias_type] = alias_value
+                    
+                    if new_mappings:
+                        # Create new alias mappings
+                        created_ids = await alias_dao.batch_create_mappings(
+                            lid=existing_literature.lid,
+                            mappings=new_mappings,
+                            confidence=1.0,
+                            metadata={
+                                "source": "deduplication_discovery",
+                                "task_id": task_id,
+                                "created_from": "new_identifier_mapping"
+                            }
+                        )
+                        
+                        logger.info(
+                            f"Task {task_id}: Created {len(created_ids)} new alias mappings for existing LID {existing_literature.lid}: {list(new_mappings.keys())}"
+                        )
+                    else:
+                        logger.info(f"Task {task_id}: No new aliases found for existing literature {existing_literature.lid}")
+                        
+            except Exception as e:
+                # Don't fail the task if alias recording fails
+                logger.error(f"Task {task_id}: Failed to record new aliases for existing literature {existing_id}: {e}")
+            
             task_manager.update_task_progress("文献已存在", 100, existing_id)
-            return task_manager.complete_task(TaskResultType.DUPLICATE, existing_id)
+            # For duplicate, also return LID if available
+            existing_literature = await dao.get_literature_by_id(existing_id)
+            
+            # If existing literature has no LID (old literature), generate one
+            if existing_literature and not existing_literature.lid and existing_literature.metadata:
+                lid_generator = LIDGenerator()
+                generated_lid = lid_generator.generate_lid(existing_literature.metadata)
+                
+                # Update the literature with the new LID
+                existing_literature.lid = generated_lid
+                await dao.finalize_literature(existing_id, existing_literature)
+                
+                logger.info(f"Task {task_id}: Generated LID {generated_lid} for existing literature {existing_id}")
+                final_id = generated_lid
+            else:
+                final_id = existing_literature.lid if existing_literature and existing_literature.lid else existing_id
+                
+            return task_manager.complete_task(TaskResultType.DUPLICATE, final_id)
 
         # 2. Create Placeholder and update task metadata
         literature_id = await dao.create_placeholder(task_id, identifiers)
@@ -572,8 +720,13 @@ async def _process_literature_async(
                 abstract=None,
             )
 
+        # Generate Literature ID (LID) from metadata
+        lid_generator = LIDGenerator()
+        generated_lid = lid_generator.generate_lid(metadata)
+        
         literature = LiteratureModel(
             user_id=None,  # Optional field for user association
+            lid=generated_lid,  # Add the generated LID
             task_info=task_info,
             identifiers=identifiers,
             metadata=metadata,
@@ -582,8 +735,14 @@ async def _process_literature_async(
         )
 
         await dao.finalize_literature(literature_id, literature)
+        
+        # Record alias mappings for the newly created literature
+        task_manager.update_task_progress("记录别名映射", 95, literature_id)
+        await _record_alias_mappings(literature, source, dao, task_id)
+        
         task_manager.update_task_progress("处理完成", 100, literature_id)
-        return task_manager.complete_task(TaskResultType.CREATED, literature_id)
+        # Return LID instead of MongoDB ObjectId for API consistency
+        return task_manager.complete_task(TaskResultType.CREATED, literature.lid or literature_id)
 
     except Exception as e:
         logger.error(f"Task {task_id} failed: {e}", exc_info=True)

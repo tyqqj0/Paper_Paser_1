@@ -228,6 +228,12 @@ class LiteratureModel(BaseModel):
         alias="_id",
         description="MongoDB document ID",
     )
+    lid: Optional[str] = Field(
+        default=None,
+        description="Literature ID - The universal and persistent identifier for a literature.",
+        index=True,
+        unique=True,
+    )
     user_id: Optional[PyObjectId] = Field(
         None,
         description="ID of the user who created this literature",

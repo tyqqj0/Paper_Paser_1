@@ -5,32 +5,32 @@ echo "====================================="
 
 echo
 echo "📊 检查所有容器状态:"
-docker-compose ps
+docker compose ps
 
-# echo
-# echo "🔧 API容器日志 (最后50行):"
-# echo "-------------------------------------"
-# docker-compose logs --tail=50 api
+echo
+echo "🔧 API容器日志 (最后50行):"
+echo "-------------------------------------"
+docker compose logs --tail=50 api
 
 echo
 echo "👷 Worker容器日志 (最后50行):"
 echo "-------------------------------------"
-docker-compose logs --tail=50 worker
+docker compose logs --tail=50 worker
 
-# echo
-# echo "📦 Redis容器日志 (最后20行):"
-# echo "-------------------------------------"
-# docker-compose logs --tail=20 redis
+echo
+echo "📦 Redis容器日志 (最后20行):"
+echo "-------------------------------------"
+docker compose logs --tail=20 redis
 
-# echo
-# echo "🗄️ MongoDB容器日志 (最后20行):"
-# echo "-------------------------------------"
-# docker-compose logs --tail=20 db
+echo
+echo "🗄️ MongoDB容器日志 (最后20行):"
+echo "-------------------------------------"
+docker compose logs --tail=20 db
 
 echo
 echo "🌐 GROBID容器日志 (最后20行):"
 echo "-------------------------------------"
-docker-compose logs --tail=50 grobid
+docker compose logs --tail=50 grobid
 
 echo
 echo "====================================="

@@ -78,7 +78,21 @@ class WaterfallDeduplicator:
     async def _check_explicit_identifiers(
         self, source_data: Dict[str, Any],
     ) -> Optional[str]:
-        """Check for duplicates using explicit identifiers (DOI, ArXiv ID)."""
+        """Check for duplicates using explicit identifiers (LID, DOI, ArXiv ID)."""
+
+        # Extract and check LID (highest priority)
+        lid = source_data.get("lid")
+        if lid:
+            logger.info(f"Task {self.task_id}: Checking LID: {lid}")
+            if literature := await self.dao.find_by_lid(lid):
+                # Clean up failed literature
+                if literature.task_info and literature.task_info.status == "failed":
+                    logger.info(
+                        f"Task {self.task_id}: Cleaning up failed literature with LID {lid}",
+                    )
+                    await self.dao.delete_literature(str(literature.id))
+                    return None
+                return str(literature.id)
 
         # Extract and check DOI
         doi = self._extract_doi(source_data)

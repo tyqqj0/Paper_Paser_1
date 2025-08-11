@@ -22,6 +22,13 @@ from ..models.literature import (
 )
 from .mongodb import get_task_collection, literature_collection
 
+# Import AliasDAO for unified access
+try:
+    from .alias_dao import AliasDAO
+except ImportError:
+    # AliasDAO not available yet
+    AliasDAO = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -160,6 +167,24 @@ class LiteratureDAO:
 
         except Exception as e:
             logger.error(f"Failed to find literature by ArXiv ID {arxiv_id}: {e}")
+            return None
+
+    async def find_by_lid(self, lid: str) -> Optional[LiteratureModel]:
+        """
+        Find literature by Literature ID (LID).
+
+        :param lid: Literature ID to search for
+        :return: Literature model or None if not found
+        """
+        try:
+            doc = await self.collection.find_one({"lid": lid})
+            if not doc:
+                return None
+
+            return LiteratureModel(**doc)
+
+        except Exception as e:
+            logger.error(f"Failed to find literature by LID {lid}: {e}")
             return None
 
     async def find_by_fingerprint(self, fingerprint: str) -> Optional[LiteratureModel]:

@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from loguru import logger
 
 from literature_parser_backend.db.dao import LiteratureDAO
+from literature_parser_backend.db.alias_dao import AliasDAO
 from literature_parser_backend.models.literature import (
     LiteratureCreateRequestDTO,
     LiteratureFulltextDTO,
@@ -289,9 +290,27 @@ async def create_literature(
                 detail="At least one identifier must be provided.",
             )
 
-        logger.info(f"Received submission, creating task with data: {effective_values}")
+        logger.info(f"Received submission, checking aliases first with data: {effective_values}")
 
-        # Directly create a task without any synchronous checks.
+        # NEW: Check alias system first for immediate resolution
+        alias_dao = AliasDAO.create_from_global_connection()
+        existing_lid = await alias_dao.resolve_to_lid(effective_values)
+        
+        if existing_lid:
+            # Literature already exists, return immediately with 200 OK
+            logger.info(f"Literature found via alias resolution: LID={existing_lid}")
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={
+                    "message": "Literature already exists in system.",
+                    "lid": existing_lid,
+                    "resource_url": f"/api/literature/{existing_lid}",
+                    "status": "exists"
+                },
+            )
+
+        # No alias match found, create asynchronous task as before
+        logger.info("No existing literature found, creating processing task")
         task = process_literature_task.delay(effective_values)
 
         logger.info(f"Task {task.id} created for processing.")
@@ -341,9 +360,40 @@ async def create_literature_stream(
                 detail="At least one identifier must be provided.",
             )
 
-        logger.info(f"Received SSE submission, creating task with data: {effective_values}")
+        logger.info(f"Received SSE submission, checking aliases first with data: {effective_values}")
 
-        # 创建异步任务
+        # NEW: Check alias system first for immediate resolution
+        alias_dao = AliasDAO.create_from_global_connection()
+        existing_lid = await alias_dao.resolve_to_lid(effective_values)
+        
+        if existing_lid:
+            # Literature already exists, return immediate completion event
+            logger.info(f"Literature found via alias resolution for SSE: LID={existing_lid}")
+            
+            async def immediate_completion():
+                completion_data = {
+                    "event": "completed",
+                    "literature_id": existing_lid,
+                    "resource_url": f"/api/literature/{existing_lid}",
+                    "message": "Literature already exists in system"
+                }
+                yield f"event: completed\n"
+                yield f"data: {json.dumps(completion_data)}\n\n"
+            
+            return StreamingResponse(
+                immediate_completion(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Headers": "Cache-Control",
+                }
+            )
+
+        # No alias match found, create asynchronous task as before
+        logger.info("No existing literature found, creating SSE processing task")
         task = process_literature_task.delay(effective_values)
         logger.info(f"Task {task.id} created for SSE processing.")
 
@@ -374,14 +424,18 @@ async def get_literature_summary(literature_id: str) -> LiteratureSummaryDTO:
     Get summary information for a literature.
 
     Args:
-        literature_id: The MongoDB ObjectId of the literature.
+        literature_id: The Literature ID (LID) or MongoDB ObjectId of the literature.
 
     Returns:
         The literature summary information.
     """
     try:
         dao = LiteratureDAO()
-        literature = await dao.get_literature_by_id(literature_id)
+        
+        # Try LID first, then fall back to MongoDB ObjectId
+        literature = await dao.find_by_lid(literature_id)
+        if not literature:
+            literature = await dao.get_literature_by_id(literature_id)
 
         if not literature:
             raise HTTPException(
@@ -410,7 +464,7 @@ async def get_literature_summary(literature_id: str) -> LiteratureSummaryDTO:
 
         # 转换为摘要DTO
         summary = LiteratureSummaryDTO(
-            id=str(literature.id),
+            id=literature.lid or str(literature.id),  # Use LID if available, fallback to ObjectId
             identifiers=literature.identifiers,
             metadata=literature.metadata,
             content=content_summary,
@@ -468,14 +522,18 @@ async def get_literature_fulltext(literature_id: str) -> LiteratureFulltextDTO:
     Get the full parsed content of a literature (e.g., from GROBID).
 
     Args:
-        literature_id: The MongoDB ObjectId of the literature.
+        literature_id: The Literature ID (LID) or MongoDB ObjectId of the literature.
 
     Returns:
         The DTO containing the full parsed content and processing information.
     """
     try:
         dao = LiteratureDAO()
-        literature = await dao.get_literature_by_id(literature_id)
+        
+        # Try LID first, then fall back to MongoDB ObjectId
+        literature = await dao.find_by_lid(literature_id)
+        if not literature:
+            literature = await dao.get_literature_by_id(literature_id)
 
         if not literature:
             raise HTTPException(
@@ -501,7 +559,7 @@ async def get_literature_fulltext(literature_id: str) -> LiteratureFulltextDTO:
             source = "GROBID"
 
         return LiteratureFulltextDTO(
-            literature_id=str(literature.id),
+            literature_id=literature.lid or str(literature.id),  # Use LID if available, fallback to ObjectId
             parsed_fulltext=parsed_fulltext,
             grobid_processing_info=grobid_processing_info,
             source=source,
