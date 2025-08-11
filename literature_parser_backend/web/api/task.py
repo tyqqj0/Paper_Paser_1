@@ -141,7 +141,7 @@ class UnifiedStatusManager:
             url_validation_status=url_validation_status,
             url_validation_error=url_validation_error,
             original_url=original_url,
-            resource_url=f"/api/literature/{literature_id}" if literature_id and execution_status == TaskExecutionStatus.COMPLETED else None
+            resource_url=f"/api/literatures/{literature_id}" if literature_id and execution_status == TaskExecutionStatus.COMPLETED else None
         )
 
 
