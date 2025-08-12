@@ -1,4 +1,8 @@
+# Neo4j Migration Docker Compose Configuration
+# 包含所有必要服务，支持双数据库模式
+
 services:
+  # ========== 应用服务 ==========
   api:
     build:
       context: .
@@ -8,11 +12,29 @@ services:
     restart: always
     env_file:
       - .env
+    environment:
+      # MongoDB配置（容器内使用服务名）
+      - LITERATURE_PARSER_BACKEND_DB_HOST=db
+      # Neo4j配置
+      - LITERATURE_PARSER_BACKEND_NEO4J_URI=bolt://neo4j:7687
+      - LITERATURE_PARSER_BACKEND_NEO4J_USERNAME=neo4j
+      - LITERATURE_PARSER_BACKEND_NEO4J_PASSWORD=literature_parser_neo4j
+      # Elasticsearch配置
+      - LITERATURE_PARSER_BACKEND_ES_HOST=elasticsearch
+      - LITERATURE_PARSER_BACKEND_ES_PORT=9200
+      - LITERATURE_PARSER_BACKEND_ES_USERNAME=elastic
+      - LITERATURE_PARSER_BACKEND_ES_PASSWORD=literature_parser_elastic
+      # 迁移模式配置
+      - LITERATURE_PARSER_BACKEND_DB_MODE=dual
     command: poetry run python -m literature_parser_backend
     depends_on:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      elasticsearch:
         condition: service_healthy
     networks:
       - literature_parser_network
@@ -28,6 +50,18 @@ services:
     restart: always
     env_file:
       - .env
+    environment:
+      # MongoDB配置（容器内使用服务名）
+      - LITERATURE_PARSER_BACKEND_DB_HOST=db
+      # 与api相同的配置
+      - LITERATURE_PARSER_BACKEND_NEO4J_URI=bolt://neo4j:7687
+      - LITERATURE_PARSER_BACKEND_NEO4J_USERNAME=neo4j
+      - LITERATURE_PARSER_BACKEND_NEO4J_PASSWORD=literature_parser_neo4j
+      - LITERATURE_PARSER_BACKEND_ES_HOST=elasticsearch
+      - LITERATURE_PARSER_BACKEND_ES_PORT=9200
+      - LITERATURE_PARSER_BACKEND_ES_USERNAME=elastic
+      - LITERATURE_PARSER_BACKEND_ES_PASSWORD=literature_parser_elastic
+      - LITERATURE_PARSER_BACKEND_DB_MODE=dual
     command: poetry run celery -A literature_parser_backend.worker.celery_app worker --loglevel=info --concurrency=8 --queues=literature
     depends_on:
       db:
@@ -36,11 +70,94 @@ services:
         condition: service_healthy
       grobid:
         condition: service_started
+      neo4j:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
     volumes:
       - ./debug_pdfs:/tmp/debug_pdfs
     networks:
       - literature_parser_network
 
+  # ========== 新增服务 ==========
+  neo4j:
+    image: neo4j:5.15-community
+    container_name: literature_parser_neo4j
+    restart: always
+    environment:
+      # 认证配置
+      - NEO4J_AUTH=neo4j/literature_parser_neo4j
+      
+      # 性能配置
+      - NEO4J_dbms_memory_heap_initial__size=512m
+      - NEO4J_dbms_memory_heap_max__size=2G
+      - NEO4J_dbms_memory_pagecache_size=1G
+      
+      # APOC插件支持（图算法）
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_apoc_export_file_enabled=true
+      - NEO4J_apoc_import_file_enabled=true
+      
+      # 安全配置
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - NEO4J_dbms_security_allow__csv__import__from__file__urls=true
+      
+    ports:
+      - "7474:7474"  # HTTP
+      - "7687:7687"  # Bolt
+    volumes:
+      - literature_parser_neo4j_data:/data
+      - literature_parser_neo4j_logs:/logs
+      - literature_parser_neo4j_import:/var/lib/neo4j/import
+      - literature_parser_neo4j_plugins:/plugins
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "literature_parser_neo4j", "RETURN 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks:
+      - literature_parser_network
+
+  elasticsearch:
+    image: elasticsearch:8.11.0
+    container_name: literature_parser_elasticsearch
+    restart: always
+    environment:
+      # 集群配置
+      - node.name=literature_parser_es_node
+      - cluster.name=literature_parser_es_cluster
+      - discovery.type=single-node
+      
+      # 内存配置
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+      - bootstrap.memory_lock=true
+      
+      # 安全配置
+      - ELASTIC_PASSWORD=literature_parser_elastic
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
+      
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - literature_parser_elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD", "curl", "-u", "elastic:literature_parser_elastic", "-f", "http://localhost:9200/_cluster/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks:
+      - literature_parser_network
+
+  # ========== 原有必要服务 ==========
   db:
     image: mongo:7.0
     hostname: literature_parser_backend-db
@@ -95,49 +212,25 @@ services:
     ports:
       - "8070:8070"
 
-  # Optional: Redis Commander for Redis management (development only)
-  redis-commander:
-    image: rediscommander/redis-commander:latest
-    hostname: literature_parser_backend-redis-commander
-    restart: always
-    environment:
-      REDIS_HOSTS: redis:redis:6379
-    depends_on:
-      redis:
-        condition: service_healthy
-    networks:
-      - literature_parser_network
-    ports:
-      - "8081:8081"
-    profiles:
-      - dev
-
-  # Optional: Mongo Express for MongoDB management (development only)
-  mongo-express:
-    image: mongo-express:latest
-    hostname: literature_parser_backend-mongo-express
-    restart: always
-    environment:
-      ME_CONFIG_MONGODB_ADMINUSERNAME: literature_parser_backend
-      ME_CONFIG_MONGODB_ADMINPASSWORD: literature_parser_backend
-      ME_CONFIG_MONGODB_URL: mongodb://literature_parser_backend:literature_parser_backend@literature_parser_backend-db:27017/
-      ME_CONFIG_BASICAUTH: "false"
-    depends_on:
-      db:
-        condition: service_healthy
-    networks:
-      - literature_parser_network
-    ports:
-      - "8082:8081"
-    profiles:
-      - dev
-
 networks:
   literature_parser_network:
     driver: bridge
 
 volumes:
+  # 原有卷保持
   literature_parser_backend-db-data:
-    name: literature_parser_backend-db-data
   literature_parser_backend-redis-data:
-    name: literature_parser_backend-redis-data
+  
+  # Neo4j新增卷
+  literature_parser_neo4j_data:
+    driver: local
+  literature_parser_neo4j_logs:
+    driver: local  
+  literature_parser_neo4j_import:
+    driver: local
+  literature_parser_neo4j_plugins:
+    driver: local
+    
+  # Elasticsearch新增卷
+  literature_parser_elasticsearch_data:
+    driver: local

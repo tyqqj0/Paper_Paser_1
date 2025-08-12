@@ -1,7 +1,7 @@
 import enum
 from pathlib import Path
 from tempfile import gettempdir
-from typing import Dict
+from typing import Any, Dict
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from yarl import URL
@@ -18,6 +18,14 @@ class LogLevel(str, enum.Enum):
     WARNING = "WARNING"
     ERROR = "ERROR"
     FATAL = "FATAL"
+
+
+class DatabaseMode(str, enum.Enum):
+    """Database operation mode for migration."""
+    
+    MONGODB_ONLY = "mongodb_only"  # 只使用MongoDB (现状)
+    DUAL = "dual"                  # 双数据库并存 (迁移期间)
+    NEO4J_ONLY = "neo4j_only"     # 只使用Neo4j (迁移完成)
 
 
 class Settings(BaseSettings):
@@ -45,13 +53,30 @@ class Settings(BaseSettings):
     cors_methods: list[str] = ["*"]  # 允许的HTTP方法
     cors_headers: list[str] = ["*"]  # 允许的请求头
     cors_credentials: bool = True    # 是否允许携带凭证
-    # Variables for the database
+    # ========== Database Configuration ==========
+    # MongoDB settings (original)
     db_host: str = "localhost"
     db_port: int = 27017
     db_user: str = "literature_parser_backend"
     db_pass: str = "literature_parser_backend"
     db_base: str = "literature_parser"
     db_echo: bool = False
+    
+    # Neo4j settings (new)
+    neo4j_uri: str = "bolt://localhost:7687"
+    neo4j_username: str = "neo4j"
+    neo4j_password: str = "literature_parser_neo4j"
+    neo4j_database: str = "neo4j"  # 默认数据库名
+    
+    # Elasticsearch settings (new)
+    es_host: str = "localhost"
+    es_port: int = 9200
+    es_username: str = "elastic"
+    es_password: str = "literature_parser_elastic"
+    es_index_prefix: str = "literature_parser"
+    
+    # Database operation mode
+    db_mode: DatabaseMode = DatabaseMode.MONGODB_ONLY
 
     # External API settings
     grobid_base_url: str = "http://localhost:8070"
@@ -136,6 +161,28 @@ class Settings(BaseSettings):
     def celery_result_backend_computed(self) -> str:
         """Get Celery result backend URL, using redis_url if not explicitly set."""
         return self.celery_result_backend or self.redis_url
+    
+    @property
+    def neo4j_connection_config(self) -> Dict[str, str]:
+        """Get Neo4j connection configuration."""
+        return {
+            "uri": self.neo4j_uri,
+            "username": self.neo4j_username,
+            "password": self.neo4j_password,
+            "database": self.neo4j_database
+        }
+    
+    @property
+    def es_connection_config(self) -> Dict[str, Any]:
+        """Get Elasticsearch connection configuration."""
+        return {
+            "host": self.es_host,
+            "port": self.es_port,
+            "http_auth": (self.es_username, self.es_password),
+            "http_compress": True,
+            "verify_certs": False,  # 开发环境暂时关闭SSL验证
+            "ssl_show_warn": False
+        }
 
     def get_proxy_dict(self) -> Dict[str, str]:
         """Get proxy configuration as dictionary for requests."""
