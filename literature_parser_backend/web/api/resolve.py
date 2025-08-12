@@ -10,9 +10,9 @@ from typing import Dict, Any
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import JSONResponse
 
-from literature_parser_backend.db.alias_dao import AliasDAO
 from literature_parser_backend.models.literature import LiteratureCreateRequestDTO
 from literature_parser_backend.worker.tasks import process_literature_task
+from literature_parser_backend.db.alias_dao import AliasDAO
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/resolve", tags=["文献解析"])
@@ -55,7 +55,7 @@ async def resolve_literature(
         logger.info(f"Resolve request received with data: {effective_values}")
 
         # Check alias system first for immediate resolution
-        alias_dao = AliasDAO.create_from_global_connection()
+        alias_dao = AliasDAO()
         existing_lid = await alias_dao.resolve_to_lid(effective_values)
         
         if existing_lid:

@@ -9,8 +9,8 @@ from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from literature_parser_backend.db.dao import LiteratureDAO
 from literature_parser_backend.models.literature import LiteratureSummaryDTO
+from literature_parser_backend.db.dao import LiteratureDAO
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/literatures", tags=["文献查询"])
@@ -37,10 +37,12 @@ async def get_literature_by_lid(lid: str) -> LiteratureSummaryDTO:
     try:
         dao = LiteratureDAO()
         
-        # Try LID first, then fall back to MongoDB ObjectId
+        # Find by LID using Neo4j DAO
         literature = await dao.find_by_lid(lid)
         if not literature:
-            literature = await dao.get_literature_by_id(lid)
+            # For legacy ObjectId support, we may need to implement this method
+            # For now, try to find by LID only in Neo4j-only mode
+            pass
 
         if not literature:
             raise HTTPException(
@@ -48,9 +50,15 @@ async def get_literature_by_lid(lid: str) -> LiteratureSummaryDTO:
                 detail=f"Literature not found: {lid}",
             )
 
-        # Extract convenience fields
-        from literature_parser_backend.web.api.literature import _extract_convenience_fields
-        convenience_data = _extract_convenience_fields(literature)
+        # Extract convenience fields (simplified for Neo4j-only mode)
+        convenience_data = {
+            'title': literature.metadata.title if literature.metadata else None,
+            'authors': [author.name for author in literature.metadata.authors] if literature.metadata and literature.metadata.authors else [],
+            'year': literature.metadata.year if literature.metadata else None,
+            'journal': literature.metadata.journal if literature.metadata else None,
+            'doi': literature.identifiers.doi if literature.identifiers else None,
+            'abstract': literature.metadata.abstract if literature.metadata else None,
+        }
 
         # Create content summary (exclude large parsed_fulltext)
         content_summary = {}
@@ -151,9 +159,15 @@ async def get_literatures_batch(
                     literature = await dao.get_literature_by_id(lid)
 
                 if literature:
-                    # Extract convenience fields
-                    from literature_parser_backend.web.api.literature import _extract_convenience_fields
-                    convenience_data = _extract_convenience_fields(literature)
+                    # Extract convenience fields  
+                    convenience_data = {
+                        'title': literature.metadata.title if literature.metadata else None,
+                        'authors': [author.name for author in literature.metadata.authors] if literature.metadata and literature.metadata.authors else [],
+                        'year': literature.metadata.year if literature.metadata else None,
+                        'journal': literature.metadata.journal if literature.metadata else None,
+                        'doi': literature.identifiers.doi if literature.identifiers else None,
+                        'abstract': literature.metadata.abstract if literature.metadata else None,
+                    }
 
                     # Create content summary
                     content_summary = {}

@@ -2,9 +2,10 @@
 
 from .dao import LiteratureDAO
 from .alias_dao import AliasDAO
-from .mongodb import (
+from .relationship_dao import RelationshipDAO
+from .neo4j import (
     close_task_connection,
-    connect_to_mongodb,
+    connect_to_mongodb,  # Compatibility name for Neo4j connection
     create_task_connection,
     create_task_indexes,
     get_database,
@@ -15,9 +16,10 @@ from .mongodb import (
 __all__ = [
     "get_database",
     "literature_collection",
-    "connect_to_mongodb",
+    "connect_to_mongodb",  # Actually connects to Neo4j
     "LiteratureDAO",
     "AliasDAO",
+    "RelationshipDAO",
     "create_task_connection",
     "close_task_connection",
     "get_task_collection",

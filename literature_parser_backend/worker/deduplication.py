@@ -90,9 +90,9 @@ class WaterfallDeduplicator:
                     logger.info(
                         f"Task {self.task_id}: Cleaning up failed literature with LID {lid}",
                     )
-                    await self.dao.delete_literature(str(literature.id))
+                    await self.dao.delete_literature(literature.lid)
                     return None
-                return str(literature.id)
+                return literature.lid
 
         # Extract and check DOI
         doi = self._extract_doi(source_data)
@@ -104,9 +104,18 @@ class WaterfallDeduplicator:
                     logger.info(
                         f"Task {self.task_id}: Cleaning up failed literature with DOI {doi}",
                     )
-                    await self.dao.delete_literature(str(literature.id))
+                    await self.dao.delete_literature(literature.lid)
                     return None
-                return str(literature.id)
+                
+                # Skip placeholder nodes - they are not complete literature
+                if (literature.raw_data and 
+                    literature.raw_data.get("placeholder") == True and 
+                    literature.metadata.title == "Processing..."):
+                    logger.info(f"Task {self.task_id}: Skipping placeholder node with DOI {doi}, LID: {literature.lid}")
+                    return None
+                    
+                logger.info(f"Task {self.task_id}: Found existing literature with DOI, LID: {literature.lid}")
+                return literature.lid
 
         # Extract and check ArXiv ID
         arxiv_id = self._extract_arxiv_id(source_data)
@@ -118,9 +127,9 @@ class WaterfallDeduplicator:
                     logger.info(
                         f"Task {self.task_id}: Cleaning up failed literature with ArXiv ID {arxiv_id}",
                     )
-                    await self.dao.delete_literature(str(literature.id))
+                    await self.dao.delete_literature(literature.lid)
                     return None
-                return str(literature.id)
+                return literature.lid
 
         return None
 
@@ -159,10 +168,10 @@ class WaterfallDeduplicator:
                         logger.info(
                             f"Task {self.task_id}: Cleaning up failed literature with URL {url}",
                         )
-                        await self.dao.delete_literature(str(literature.id))
+                        await self.dao.delete_literature(literature.lid)
                         continue
 
-                    return str(literature.id)
+                    return literature.lid
             except Exception as e:
                 logger.error(
                     f"Task {self.task_id}: Error checking source URL {url}: {e}",
@@ -200,7 +209,7 @@ class WaterfallDeduplicator:
                 logger.info(
                     f"Task {self.task_id}: Found same content being processed in task {literature.task_info.task_id}",
                 )
-                return str(literature.id)
+                return literature.lid
         except Exception as e:
             logger.error(f"Task {self.task_id}: Error checking processing state: {e}")
 
@@ -235,9 +244,9 @@ class WaterfallDeduplicator:
                         logger.info(
                             f"Task {self.task_id}: Cleaning up failed literature with fingerprint {content_fingerprint}",
                         )
-                        await self.dao.delete_literature(str(literature.id))
+                        await self.dao.delete_literature(literature.lid)
                     else:
-                        return str(literature.id), None, pdf_content
+                        return literature.lid, None, pdf_content
 
                 # Try to parse metadata for title-based deduplication
                 try:
@@ -268,9 +277,9 @@ class WaterfallDeduplicator:
                                 logger.info(
                                     f"Task {self.task_id}: Cleaning up failed literature with title fingerprint",
                                 )
-                                await self.dao.delete_literature(str(literature.id))
+                                await self.dao.delete_literature(literature.lid)
                             else:
-                                return str(literature.id), metadata, pdf_content
+                                return literature.lid, metadata, pdf_content
 
                 except Exception as e:
                     logger.warning(

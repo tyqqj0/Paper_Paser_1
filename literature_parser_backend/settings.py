@@ -20,12 +20,7 @@ class LogLevel(str, enum.Enum):
     FATAL = "FATAL"
 
 
-class DatabaseMode(str, enum.Enum):
-    """Database operation mode for migration."""
-    
-    MONGODB_ONLY = "mongodb_only"  # 只使用MongoDB (现状)
-    DUAL = "dual"                  # 双数据库并存 (迁移期间)
-    NEO4J_ONLY = "neo4j_only"     # 只使用Neo4j (迁移完成)
+# DatabaseMode enum removed - using Neo4j only
 
 
 class Settings(BaseSettings):
@@ -54,29 +49,18 @@ class Settings(BaseSettings):
     cors_headers: list[str] = ["*"]  # 允许的请求头
     cors_credentials: bool = True    # 是否允许携带凭证
     # ========== Database Configuration ==========
-    # MongoDB settings (original)
-    db_host: str = "localhost"
-    db_port: int = 27017
-    db_user: str = "literature_parser_backend"
-    db_pass: str = "literature_parser_backend"
-    db_base: str = "literature_parser"
-    db_echo: bool = False
-    
-    # Neo4j settings (new)
+    # Neo4j settings (primary database)
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_username: str = "neo4j"
     neo4j_password: str = "literature_parser_neo4j"
-    neo4j_database: str = "neo4j"  # 默认数据库名
+    neo4j_database: str = "neo4j"  # Default database name
     
-    # Elasticsearch settings (new)
+    # Elasticsearch settings (for full-text search)
     es_host: str = "localhost"
     es_port: int = 9200
     es_username: str = "elastic"
     es_password: str = "literature_parser_elastic"
     es_index_prefix: str = "literature_parser"
-    
-    # Database operation mode
-    db_mode: DatabaseMode = DatabaseMode.MONGODB_ONLY
 
     # External API settings
     grobid_base_url: str = "http://localhost:8070"
@@ -126,21 +110,7 @@ class Settings(BaseSettings):
     celery_task_soft_time_limit: int = 30 * 60  # 30 minutes (增加5分钟缓冲)
     celery_worker_prefetch_multiplier: int = 2  # 每个worker预取2个任务提高效率
 
-    @property
-    def db_url(self) -> URL:
-        """
-        Assemble database URL from settings.
-
-        :return: database URL.
-        """
-        return URL.build(
-            scheme="mongodb",
-            host=self.db_host,
-            port=self.db_port,
-            user=self.db_user,
-            password=self.db_pass,
-            path=f"/{self.db_base}",
-        ).with_query({"authSource": "admin"})
+    # MongoDB db_url method removed - using Neo4j only
 
     @property
     def redis_url(self) -> str:
@@ -170,18 +140,6 @@ class Settings(BaseSettings):
             "username": self.neo4j_username,
             "password": self.neo4j_password,
             "database": self.neo4j_database
-        }
-    
-    @property
-    def es_connection_config(self) -> Dict[str, Any]:
-        """Get Elasticsearch connection configuration."""
-        return {
-            "host": self.es_host,
-            "port": self.es_port,
-            "http_auth": (self.es_username, self.es_password),
-            "http_compress": True,
-            "verify_certs": False,  # 开发环境暂时关闭SSL验证
-            "ssl_show_warn": False
         }
 
     def get_proxy_dict(self) -> Dict[str, str]:

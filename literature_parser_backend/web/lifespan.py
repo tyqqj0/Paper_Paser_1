@@ -1,12 +1,14 @@
+"""Application lifespan management for Neo4j database connection."""
+
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from loguru import logger
 
-from literature_parser_backend.db.mongodb import (
-    connect_to_mongodb,
-    disconnect_from_mongodb,
+from literature_parser_backend.db.neo4j import (
+    connect_to_mongodb,  # Actually connects to Neo4j (compatibility name)
+    disconnect_from_mongodb,  # Actually disconnects from Neo4j
 )
 
 
@@ -17,28 +19,27 @@ async def lifespan_setup(
     """
     Actions to run on application startup.
 
-    This function uses fastAPI app to store data
-    in the state, such as db_engine.
+    This function initializes the Neo4j database connection.
 
     :param app: the fastAPI application.
     :return: function that actually performs actions.
     """
 
-    # Initialize MongoDB connection
+    # Initialize Neo4j connection
     try:
-        logger.info("Initializing MongoDB connection...")
-        await connect_to_mongodb()
-        logger.info("MongoDB connection established successfully")
+        logger.info("Initializing Neo4j connection...")
+        await connect_to_mongodb()  # Actually connects to Neo4j
+        logger.info("Neo4j connection established successfully")
     except Exception as e:
-        logger.error(f"Failed to connect to MongoDB: {e}")
+        logger.error(f"Failed to connect to Neo4j: {e}")
         raise
 
     yield
 
     # Cleanup on shutdown
     try:
-        logger.info("Closing MongoDB connection...")
-        await disconnect_from_mongodb()
-        logger.info("MongoDB connection closed")
+        logger.info("Closing Neo4j connection...")
+        await disconnect_from_mongodb()  # Actually disconnects from Neo4j
+        logger.info("Neo4j connection closed")
     except Exception as e:
-        logger.error(f"Error closing MongoDB connection: {e}")
+        logger.error(f"Error closing Neo4j connection: {e}")

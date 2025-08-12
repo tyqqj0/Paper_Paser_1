@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional, Tuple
 from celery import Task, current_task
 
 from ..db.dao import LiteratureDAO
-from ..db.mongodb import close_task_connection, create_task_connection
+from ..db.neo4j import close_task_connection, create_task_connection
 from ..models.literature import (
     IdentifiersModel,
     LiteratureModel,
@@ -252,7 +252,7 @@ async def _record_alias_mappings(
             return
         
         # Create alias DAO from same database connection
-        alias_dao = AliasDAO.create_from_task_connection(dao.collection.database)
+        alias_dao = AliasDAO(database=dao.driver)
         
         # Extract aliases from source data
         source_aliases = extract_aliases_from_source(source_data)
@@ -329,10 +329,12 @@ async def _process_literature_async(
         dao = LiteratureDAO.create_from_task_connection(database)
 
         # 1. Enhanced Waterfall Deduplication
+        logger.info(f"Task {task_id}: About to start deduplication with source: {source}")
         deduplicator = WaterfallDeduplicator(dao, task_id)
         existing_id, prefetched_meta, pdf_content = (
             await deduplicator.deduplicate_literature(source)
         )
+        logger.info(f"Task {task_id}: Deduplication completed. Existing ID: {existing_id}")
 
         # Extract identifiers for downstream processing
         try:
@@ -699,14 +701,24 @@ async def _process_literature_async(
         final_overall_status = await dao.sync_task_status(literature_id)
         logger.info(f"Final synchronized task status: {final_overall_status}")
 
-        # Create task info with the calculated status
-        task_info = TaskInfoModel(
-            task_id=task_id,
-            status=final_overall_status,
-            created_at=datetime.now(),
-            completed_at=datetime.now(),
-            error_message=None,  # Will be preserved from component updates
-        )
+        # Get current task_info from placeholder to preserve component statuses
+        current_literature = await dao.find_by_lid(literature_id)
+        if current_literature and current_literature.task_info:
+            # Preserve the existing task_info with all component statuses
+            task_info = current_literature.task_info
+            # Update final status and completion time
+            task_info.status = final_overall_status
+            task_info.completed_at = datetime.now()
+        else:
+            # Fallback: create new task info (should not happen in normal flow)
+            task_info = TaskInfoModel(
+                task_id=task_id,
+                status=final_overall_status,
+                created_at=datetime.now(),
+                completed_at=datetime.now(),
+                error_message=None,
+            )
+            logger.warning(f"Could not find existing task_info for {literature_id}, created new one")
 
         # Ensure metadata is not None
         if metadata is None:
