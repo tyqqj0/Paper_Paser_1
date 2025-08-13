@@ -423,6 +423,101 @@ async def _record_alias_mappings(
         )
 
 
+async def _upgrade_matching_unresolved_nodes(
+    literature: "LiteratureModel",
+    dao: "LiteratureDAO", 
+    task_id: str
+):
+    """
+    检查并升级匹配的未解析节点。
+    
+    当新文献添加时，检查是否有匹配的未解析占位符节点，
+    如果有，将这些节点升级为指向真实文献的关系。
+    
+    Args:
+        literature: 新创建的文献模型
+        dao: 数据库访问对象
+        task_id: 当前任务ID
+    """
+    try:
+        from ..db.relationship_dao import RelationshipDAO
+        from ..worker.citation_resolver import CitationResolver
+        
+        # 创建关系DAO - 使用相同的数据库连接
+        relationship_dao = RelationshipDAO(database=dao.driver if hasattr(dao, 'driver') else None)
+        
+        # 生成匹配候选的LID模式
+        matching_patterns = []
+        
+        # 1. 基于title + authors + year生成相同的LID (保持原有匹配方式)
+        if literature.metadata and literature.metadata.title and literature.metadata.authors:
+            import hashlib
+            
+            # 构建与CitationResolver._generate_placeholder_lid相同的字符串
+            reference_string = ""
+            reference_string += literature.metadata.title
+            if literature.metadata.authors:
+                reference_string += str([{"full_name": author.name} for author in literature.metadata.authors])
+            if literature.metadata.year:
+                reference_string += str(literature.metadata.year)
+            
+            # 生成相同的hash
+            hash_object = hashlib.md5(reference_string.encode())
+            short_hash = hash_object.hexdigest()[:8]
+            potential_lid = f"unresolved-{short_hash}"
+            matching_patterns.append(potential_lid)
+        
+        logger.info(f"Task {task_id}: Searching for unresolved nodes to upgrade: {matching_patterns}")
+        
+        # 检查每个可能的LID
+        upgraded_count = 0
+        for pattern_lid in matching_patterns:
+            try:
+                # 检查是否存在这个未解析节点
+                async with relationship_dao._get_session() as session:
+                    check_query = """
+                    MATCH (unresolved:Unresolved {lid: $pattern_lid})
+                    RETURN unresolved.lid as lid, unresolved.parsed_title as title
+                    """
+                    
+                    result = await session.run(check_query, pattern_lid=pattern_lid)
+                    record = await result.single()
+                    
+                    if record:
+                        logger.info(f"Task {task_id}: Found matching unresolved node: {pattern_lid} -> {record['title']}")
+                        
+                        # 执行升级
+                        upgrade_stats = await relationship_dao.upgrade_unresolved_to_literature(
+                            placeholder_lid=pattern_lid,
+                            literature_lid=literature.lid
+                        )
+                        
+                        if upgrade_stats.get("relationships_updated", 0) > 0:
+                            upgraded_count += 1
+                            logger.info(
+                                f"Task {task_id}: ✅ Upgraded {pattern_lid} -> {literature.lid}, "
+                                f"updated {upgrade_stats['relationships_updated']} relationships"
+                            )
+                        else:
+                            logger.warning(
+                                f"Task {task_id}: ⚠️ Found {pattern_lid} but no relationships to upgrade"
+                            )
+                    
+            except Exception as e:
+                logger.warning(f"Task {task_id}: Error checking pattern {pattern_lid}: {e}")
+                # 继续检查其他模式
+        
+        if upgraded_count > 0:
+            logger.info(f"Task {task_id}: ✅ Successfully upgraded {upgraded_count} unresolved nodes to literature {literature.lid}")
+        else:
+            logger.info(f"Task {task_id}: No matching unresolved nodes found for literature {literature.lid}")
+        
+    except Exception as e:
+        logger.error(f"Task {task_id}: Error in unresolved node upgrade: {e}", exc_info=True)
+        # 不要因为升级失败而使整个任务失败
+        pass
+
+
 async def _process_literature_async(
     task_id: str,
     source: Dict[str, Any],
@@ -920,6 +1015,10 @@ async def _process_literature_async(
         task_manager.update_task_progress("记录别名映射", 95, literature_id)
         await _record_alias_mappings(literature, source, dao, task_id)
         
+        # 🆕 检查并升级匹配的未解析节点
+        task_manager.update_task_progress("升级未解析节点", 97, literature_id)
+        await _upgrade_matching_unresolved_nodes(literature, dao, task_id)
+        
         task_manager.update_task_progress("处理完成", 100, literature_id)
         # Return LID instead of MongoDB ObjectId for API consistency
         return task_manager.complete_task(TaskResultType.CREATED, literature.lid or literature_id)
@@ -936,6 +1035,238 @@ async def _process_literature_async(
         # Always close the task connection
         if client:
             await close_task_connection(client)
+
+
+# async def _check_version_merge_strategy(
+#     dao: "LiteratureDAO", 
+#     current_literature: "LiteratureModel", 
+#     unresolved_title: str, 
+#     task_id: str
+# ) -> tuple[bool, str]:
+#     """
+#     检查版本合并策略。
+    
+#     当发现匹配的未解析节点时，检查是否已存在相同标题的Literature，
+#     如果存在则决定合并策略。
+    
+#     Args:
+#         dao: Literature数据访问对象
+#         current_literature: 当前要添加的文献
+#         unresolved_title: 未解析节点的标题
+#         task_id: 任务ID
+        
+#     Returns:
+#         (should_upgrade: bool, merge_action: str)
+#         merge_action可以是: "normal", "add_as_alias", "upgrade_and_merge"
+#     """
+#     from ..utils.title_normalization import are_titles_equivalent
+    
+#     try:
+#         # 1. 检查是否已存在相同标题的Literature
+#         if not current_literature.metadata or not current_literature.metadata.title:
+#             return True, "normal"
+            
+#         current_title = current_literature.metadata.title
+#         current_year = current_literature.metadata.year or 9999  # 默认为最新
+        
+#         # 2. 查找标题相同的已存在文献
+#         async with dao._get_session() as session:
+#             # 查询所有Literature节点的标题和年份
+#             query = """
+#             MATCH (lit:Literature)
+#             WHERE lit.metadata IS NOT NULL
+#             RETURN lit.lid as lid, lit.metadata as metadata
+#             """
+            
+#             result = await session.run(query)
+#             existing_literatures = []
+#             async for record in result:
+#                 metadata_str = record["metadata"]
+#                 if metadata_str:
+#                     import json
+#                     metadata = json.loads(metadata_str)
+#                     if metadata.get("title"):
+#                         existing_literatures.append({
+#                             "lid": record["lid"],
+#                             "title": metadata["title"],
+#                             "year": metadata.get("year", 9999)
+#                         })
+        
+#         # 3. 查找标题匹配的文献
+#         matching_literature = None
+#         for lit in existing_literatures:
+#             if are_titles_equivalent(current_title, lit["title"]):
+#                 matching_literature = lit
+#                 break
+        
+#         if not matching_literature:
+#             # 没有找到匹配的现有文献，正常升级
+#             return True, "normal"
+        
+#         # 4. 发现同名文献，比较年份决定策略
+#         existing_year = matching_literature["year"]
+        
+#         logger.info(
+#             f"Task {task_id}: Found existing literature with same title. "
+#             f"Current: {current_year}, Existing: {existing_year}"
+#         )
+        
+#         if current_year < existing_year:
+#             # 当前文献更早，应该成为主版本
+#             logger.info(f"Task {task_id}: Current literature is older, will merge existing as alias")
+#             return True, "upgrade_and_merge"
+#         else:
+#             # 现有文献更早或相同，当前文献应该成为别名
+#             logger.info(f"Task {task_id}: Existing literature is older, current will be added as alias")
+#             return False, "add_as_alias"
+            
+#     except Exception as e:
+#         logger.error(f"Task {task_id}: Error in version merge check: {e}")
+#         # 出错时默认正常升级
+#         return True, "normal"
+
+
+# async def _add_literature_as_alias(
+#     dao: "LiteratureDAO", 
+#     literature: "LiteratureModel", 
+#     task_id: str
+# ):
+#     """
+#     将当前文献的标识符作为别名添加到已存在的主版本。
+    
+#     Args:
+#         dao: Literature数据访问对象  
+#         literature: 要添加为别名的文献
+#         task_id: 任务ID
+#     """
+#     try:
+#         from ..db.alias_dao import AliasDAO
+#         alias_dao = AliasDAO(database=dao.driver if hasattr(dao, 'driver') else None)
+        
+#         # 1. 找到主版本Literature的LID
+#         if not literature.metadata or not literature.metadata.title:
+#             logger.warning(f"Task {task_id}: Cannot add as alias - no title")
+#             return
+            
+#         from ..utils.title_normalization import normalize_title_for_matching
+#         normalized_title = normalize_title_for_matching(literature.metadata.title)
+        
+#         # 查找主版本
+#         async with dao._get_session() as session:
+#             query = """
+#             MATCH (lit:Literature)
+#             WHERE lit.metadata IS NOT NULL
+#             RETURN lit.lid as lid, lit.metadata as metadata
+#             ORDER BY lit.created_at ASC
+#             """
+            
+#             result = await session.run(query)
+#             main_literature_lid = None
+            
+#             async for record in result:
+#                 metadata_str = record["metadata"]
+#                 if metadata_str:
+#                     import json
+#                     metadata = json.loads(metadata_str)
+#                     if metadata.get("title"):
+#                         existing_normalized = normalize_title_for_matching(metadata["title"])
+#                         if existing_normalized == normalized_title:
+#                             main_literature_lid = record["lid"]
+#                             break
+        
+#         if not main_literature_lid:
+#             logger.error(f"Task {task_id}: Cannot find main literature for alias")
+#             return
+        
+#         # 2. 创建别名映射
+#         if literature.identifiers:
+#             identifiers = literature.identifiers.model_dump() if hasattr(literature.identifiers, 'model_dump') else literature.identifiers
+            
+#             for identifier_type, value in identifiers.items():
+#                 if value:
+#                     await alias_dao.create_alias(
+#                         alias_value=value,
+#                         alias_type=identifier_type,
+#                         literature_lid=main_literature_lid
+#                     )
+                    
+#         logger.info(f"Task {task_id}: ✅ Added literature identifiers as aliases to {main_literature_lid}")
+        
+#     except Exception as e:
+#         logger.error(f"Task {task_id}: Error adding literature as alias: {e}")
+
+
+# async def _merge_existing_versions_as_aliases(
+#     dao: "LiteratureDAO", 
+#     current_literature: "LiteratureModel", 
+#     task_id: str
+# ):
+#     """
+#     将已存在的旧版本文献合并为当前文献的别名。
+    
+#     Args:
+#         dao: Literature数据访问对象
+#         current_literature: 当前的主版本文献
+#         task_id: 任务ID
+#     """
+#     try:
+#         from ..utils.title_normalization import normalize_title_for_matching, are_titles_equivalent
+#         from ..db.alias_dao import AliasDAO
+        
+#         alias_dao = AliasDAO(database=dao.driver if hasattr(dao, 'driver') else None)
+        
+#         if not current_literature.metadata or not current_literature.metadata.title:
+#             return
+            
+#         current_title = current_literature.metadata.title
+        
+#         # 1. 查找标题相同但不同版本的Literature节点
+#         async with dao._get_session() as session:
+#             query = """
+#             MATCH (lit:Literature)
+#             WHERE lit.lid <> $current_lid AND lit.metadata IS NOT NULL
+#             RETURN lit.lid as lid, lit.metadata as metadata, lit.identifiers as identifiers
+#             """
+            
+#             result = await session.run(query, current_lid=current_literature.lid)
+#             to_merge = []
+            
+#             async for record in result:
+#                 metadata_str = record["metadata"]
+#                 if metadata_str:
+#                     import json
+#                     metadata = json.loads(metadata_str)
+#                     if metadata.get("title") and are_titles_equivalent(current_title, metadata["title"]):
+#                         to_merge.append({
+#                             "lid": record["lid"],
+#                             "identifiers": record["identifiers"]
+#                         })
+        
+#         # 2. 将找到的重复文献转为别名
+#         for old_lit in to_merge:
+#             # 提取旧文献的标识符
+#             if old_lit["identifiers"]:
+#                 identifiers_str = old_lit["identifiers"]
+#                 import json
+#                 identifiers = json.loads(identifiers_str) if isinstance(identifiers_str, str) else identifiers_str
+                
+#                 # 为每个标识符创建别名
+#                 for identifier_type, value in identifiers.items():
+#                     if value and identifier_type != "fingerprint":  # 跳过fingerprint
+#                         await alias_dao.create_alias(
+#                             alias_value=value,
+#                             alias_type=identifier_type, 
+#                             literature_lid=current_literature.lid
+#                         )
+            
+#             # 删除旧的Literature节点
+#             delete_query = "MATCH (lit:Literature {lid: $old_lid}) DETACH DELETE lit"
+#             await session.run(delete_query, old_lid=old_lit["lid"])
+            
+#             logger.info(f"Task {task_id}: ✅ Merged old version {old_lit['lid']} as aliases to {current_literature.lid}")
+            
+#     except Exception as e:
+#         logger.error(f"Task {task_id}: Error merging existing versions: {e}")
 
 
 # ===============================================

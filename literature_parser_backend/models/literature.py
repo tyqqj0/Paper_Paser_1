@@ -298,105 +298,62 @@ class LiteratureModel(BaseModel):
 # ===============================
 
 
-class LiteratureSourceDTO(BaseModel):
-    """Source information for creating a literature."""
-
-    doi: Optional[str] = Field(None, description="Digital Object Identifier")
-    url: Optional[str] = Field(None, description="URL to the literature (ArXiv, etc.)")
-    pdf_url: Optional[str] = Field(None, description="Direct URL to PDF file")
-    title: Optional[str] = Field(
-        None,
-        description="Literature title (for deduplication)",
-    )
-    authors: Optional[List[str]] = Field(None, description="List of author names")
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "doi": "10.48550/arXiv.1706.03762",
-                "url": "https://arxiv.org/abs/1706.03762",
-                "title": "Attention Is All You Need",
-                "authors": ["Ashish Vaswani", "Noam Shazeer"],
-            },
-        }
-
 
 class LiteratureCreateRequestDTO(BaseModel):
-    """Request DTO for creating a new literature. Handles nested source."""
+    """
+    Request DTO for creating literature using ONLY authoritative identifiers.
+    
+    Paper Parser 0.2 Design Principle:
+    - NO user-inputted metadata (title, authors, abstract)
+    - ONLY authoritative identifiers accepted
+    - System fetches all metadata from trusted sources
+    """
 
-    source: Optional[LiteratureSourceDTO] = Field(
-        None,
-        description="Source information for the literature",
-    )
-
-    # 🎯 NEW: Support nested identifiers object (0.2 API format)
-    identifiers: Optional[Dict[str, Any]] = Field(
-        None, 
-        description="Nested identifiers object containing doi, arxiv_id, etc."
-    )
-
+    # Authoritative Identifiers (at least one required)
+    lid: Optional[str] = Field(None, description="Literature ID for existing literature lookup")
     doi: Optional[str] = Field(None, description="Digital Object Identifier")
-    arxiv_id: Optional[str] = Field(None, description="ArXiv identifier")
-    url: Optional[str] = Field(None, description="URL to the literature")
-    pdf_url: Optional[str] = Field(None, description="Direct URL to PDF file")
-    title: Optional[str] = Field(None, description="Literature title")
-    authors: Optional[List[str]] = Field(None, description="List of author names")
+    arxiv_id: Optional[str] = Field(None, description="ArXiv identifier (e.g., '1706.03762')")
+    url: Optional[str] = Field(None, description="Authoritative URL (ArXiv, journal, etc.)")
+    pdf_url: Optional[str] = Field(None, description="Direct URL to PDF file for parsing")
+    pmid: Optional[str] = Field(None, description="PubMed identifier")
+
+    def model_post_init(self, __context) -> None:
+        """Validate that at least one authoritative identifier is provided."""
+        identifiers = [self.lid, self.doi, self.arxiv_id, self.url, self.pdf_url, self.pmid]
+        if not any(identifier for identifier in identifiers):
+            raise ValueError(
+                "At least one authoritative identifier must be provided: "
+                "lid, doi, arxiv_id, url, pdf_url, or pmid"
+            )
 
     def get_effective_values(self) -> Dict[str, Any]:
-        """
-        Get a consolidated dictionary of source values.
-
-        This method intelligently merges values from the nested `source` object
-        and the top-level fields, extracts identifiers from URLs, and flattens
-        nested identifiers for compatibility with extract_authoritative_identifiers.
-        """
-        # Start with top-level values
-        effective_values = self.model_dump(exclude={"source"}, exclude_none=True)
-
-        # Merge values from the nested source object
-        if self.source:
-            effective_values.update(self.source.model_dump(exclude_none=True))
-
-        # 🎯 CRITICAL FIX: Flatten nested identifiers to top-level fields
-        # This ensures extract_authoritative_identifiers can find doi/arxiv_id
-        if "identifiers" in effective_values and isinstance(effective_values["identifiers"], dict):
-            identifiers_data = effective_values["identifiers"]
-            
-            # Extract DOI with priority: existing top-level > nested identifiers
-            if "doi" in identifiers_data and not effective_values.get("doi"):
-                effective_values["doi"] = identifiers_data["doi"]
-                
-            # Extract ArXiv ID with priority: existing top-level > nested identifiers  
-            if "arxiv_id" in identifiers_data and not effective_values.get("arxiv_id"):
-                effective_values["arxiv_id"] = identifiers_data["arxiv_id"]
-                
-            # Extract fingerprint if present
-            if "fingerprint" in identifiers_data and not effective_values.get("fingerprint"):
-                effective_values["fingerprint"] = identifiers_data["fingerprint"]
-
-        # Extract ArXiv ID from URL if not already present
-        if not effective_values.get("arxiv_id") and effective_values.get("url"):
-            url = effective_values["url"]
-            if "arxiv.org/abs/" in url:
-                try:
-                    # Extract the ID part of the URL
-                    arxiv_id = url.split("arxiv.org/abs/")[-1]
-                    effective_values["arxiv_id"] = arxiv_id
-                except IndexError:
-                    pass  # URL format is not as expected
-
-        return effective_values
+        """Get clean dictionary of authoritative identifiers only."""
+        return self.model_dump(exclude_none=True)
 
     class Config:
         json_schema_extra: ClassVar[Dict[str, Any]] = {
-            "example": {
-                "source": {
-                    "doi": "10.48550/arXiv.1706.03762",
-                    "url": "https://arxiv.org/abs/1706.03762",
-                    "title": "Attention Is All You Need",
-                    "authors": ["Ashish Vaswani", "Noam Shazeer"],
+            "examples": [
+                {
+                    "description": "By DOI",
+                    "value": {"doi": "10.48550/arXiv.1706.03762"}
                 },
-            },
+                {
+                    "description": "By ArXiv ID", 
+                    "value": {"arxiv_id": "1706.03762"}
+                },
+                {
+                    "description": "By URL",
+                    "value": {"url": "https://arxiv.org/abs/1706.03762"}
+                },
+                {
+                    "description": "By PDF URL",
+                    "value": {"pdf_url": "https://example.com/paper.pdf"}
+                },
+                {
+                    "description": "By existing LID",
+                    "value": {"lid": "2017-vaswani-aiayn-abc123"}
+                }
+            ]
         }
 
 

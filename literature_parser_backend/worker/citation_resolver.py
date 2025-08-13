@@ -306,7 +306,7 @@ class CitationResolver:
         unresolved_refs: List[UnresolvedReference]
     ):
         """
-        Create :Unresolved placeholder nodes for unmatched references.
+        Create :Unresolved placeholder nodes for unmatched references using batch operation.
         
         Args:
             citing_lid: LID of the citing literature
@@ -318,24 +318,31 @@ class CitationResolver:
         logger.info(f"Task {self.task_id}: Creating {len(unresolved_refs)} unresolved placeholder nodes")
         
         try:
+            # Prepare batch data
+            batch_citations = []
             for unresolved in unresolved_refs:
                 # Generate placeholder LID
                 placeholder_lid = self._generate_placeholder_lid(unresolved.parsed_data)
                 unresolved.placeholder_lid = placeholder_lid
                 
-                # Create placeholder node and relationship
-                await self.relationship_dao.create_unresolved_citation(
-                    citing_lid=citing_lid,
-                    placeholder_lid=placeholder_lid,
-                    reference_data={
+                # Add to batch
+                batch_citations.append({
+                    "placeholder_lid": placeholder_lid,
+                    "reference_data": {
                         "raw_text": unresolved.raw_text,
                         "parsed_data": unresolved.parsed_data,
                         "created_at": datetime.now().isoformat(),
                         "source": "citation_resolver"
                     }
-                )
+                })
+            
+            # Batch create all placeholder nodes and relationships
+            created_count = await self.relationship_dao.batch_create_unresolved_citations(
+                citing_lid=citing_lid,
+                unresolved_citations=batch_citations
+            )
                 
-            logger.info(f"Task {self.task_id}: Successfully created {len(unresolved_refs)} placeholder nodes")
+            logger.info(f"Task {self.task_id}: Successfully created {created_count} placeholder nodes")
             
         except Exception as e:
             logger.error(f"Task {self.task_id}: Error creating placeholder nodes: {e}")
@@ -345,6 +352,9 @@ class CitationResolver:
         """
         Generate a placeholder LID for an unresolved reference.
         
+        保持原有的ID生成方式，包含年份、作者等信息，确保版本区分度。
+        匹配查找时使用标题标准化，而不是依赖ID完全一致。
+        
         Args:
             parsed_data: Parsed reference data
             
@@ -353,7 +363,7 @@ class CitationResolver:
         """
         import hashlib
         
-        # Create a hash from available reference data
+        # Create a hash from available reference data (保持原有方式)
         reference_string = ""
         
         if parsed_data.get("title"):

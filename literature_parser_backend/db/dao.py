@@ -115,7 +115,7 @@ class LiteratureDAO(BaseNeo4jDAO):
                 literatures = []
                 async for record in result:
                     lit_data = dict(record["lit"])
-                    literature = await self._neo4j_record_to_model(lit_data)
+                    literature = self._neo4j_node_to_literature_model(lit_data)
                     if literature:
                         literatures.append(literature)
                         
