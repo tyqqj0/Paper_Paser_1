@@ -329,6 +329,12 @@ class LiteratureCreateRequestDTO(BaseModel):
         description="Source information for the literature",
     )
 
+    # 🎯 NEW: Support nested identifiers object (0.2 API format)
+    identifiers: Optional[Dict[str, Any]] = Field(
+        None, 
+        description="Nested identifiers object containing doi, arxiv_id, etc."
+    )
+
     doi: Optional[str] = Field(None, description="Digital Object Identifier")
     arxiv_id: Optional[str] = Field(None, description="ArXiv identifier")
     url: Optional[str] = Field(None, description="URL to the literature")
@@ -341,7 +347,8 @@ class LiteratureCreateRequestDTO(BaseModel):
         Get a consolidated dictionary of source values.
 
         This method intelligently merges values from the nested `source` object
-        and the top-level fields, and extracts identifiers from URLs.
+        and the top-level fields, extracts identifiers from URLs, and flattens
+        nested identifiers for compatibility with extract_authoritative_identifiers.
         """
         # Start with top-level values
         effective_values = self.model_dump(exclude={"source"}, exclude_none=True)
@@ -349,6 +356,23 @@ class LiteratureCreateRequestDTO(BaseModel):
         # Merge values from the nested source object
         if self.source:
             effective_values.update(self.source.model_dump(exclude_none=True))
+
+        # 🎯 CRITICAL FIX: Flatten nested identifiers to top-level fields
+        # This ensures extract_authoritative_identifiers can find doi/arxiv_id
+        if "identifiers" in effective_values and isinstance(effective_values["identifiers"], dict):
+            identifiers_data = effective_values["identifiers"]
+            
+            # Extract DOI with priority: existing top-level > nested identifiers
+            if "doi" in identifiers_data and not effective_values.get("doi"):
+                effective_values["doi"] = identifiers_data["doi"]
+                
+            # Extract ArXiv ID with priority: existing top-level > nested identifiers  
+            if "arxiv_id" in identifiers_data and not effective_values.get("arxiv_id"):
+                effective_values["arxiv_id"] = identifiers_data["arxiv_id"]
+                
+            # Extract fingerprint if present
+            if "fingerprint" in identifiers_data and not effective_values.get("fingerprint"):
+                effective_values["fingerprint"] = identifiers_data["fingerprint"]
 
         # Extract ArXiv ID from URL if not already present
         if not effective_values.get("arxiv_id") and effective_values.get("url"):

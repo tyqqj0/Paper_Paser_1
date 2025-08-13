@@ -7,16 +7,98 @@ Uses plural form '/tasks' instead of singular '/task' for REST compliance.
 
 import json
 import logging
-from typing import Dict, AsyncGenerator
+from typing import Dict, AsyncGenerator, Optional
 
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 
-from literature_parser_backend.models.task import TaskStatusDTO
+from literature_parser_backend.models.task import TaskStatusDTO, TaskExecutionStatus, TaskResultType, LiteratureProcessingStatus
 from literature_parser_backend.worker.celery_app import celery_app
+from literature_parser_backend.db.dao import LiteratureDAO
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tasks", tags=["任务跟踪"])
+
+
+class SimpleStatusManager:
+    """简化的状态管理器 - 替代已删除的UnifiedStatusManager"""
+
+    def __init__(self):
+        self.dao = LiteratureDAO()
+
+    def _map_celery_status(self, celery_status: str, task_info: dict = None) -> TaskExecutionStatus:
+        """映射Celery状态到标准任务执行状态"""
+        celery_status = celery_status.upper()
+        
+        status_mapping = {
+            "PENDING": TaskExecutionStatus.PENDING,
+            "STARTED": TaskExecutionStatus.RUNNING,
+            "SUCCESS": TaskExecutionStatus.COMPLETED,
+            "FAILURE": TaskExecutionStatus.FAILED,
+            "RETRY": TaskExecutionStatus.RUNNING,
+            "REVOKED": TaskExecutionStatus.FAILED,
+        }
+        
+        return status_mapping.get(celery_status, TaskExecutionStatus.PENDING)
+
+    async def get_unified_status(self, task_id: str) -> TaskStatusDTO:
+        """获取统一的任务状态 - 修复版，总是返回TaskStatusDTO"""
+        try:
+            # 从Celery获取任务状态
+            result = celery_app.AsyncResult(task_id)
+            
+            execution_status = TaskExecutionStatus.PENDING
+            literature_status = LiteratureProcessingStatus.PENDING
+            literature_id = None
+            error_message = None
+
+            if result:
+                execution_status = self._map_celery_status(result.status)
+
+                # 获取任务结果
+                if result.ready():
+                    if result.successful():
+                        task_result = result.get()
+                        if isinstance(task_result, dict):
+                            literature_id = task_result.get("lid") or task_result.get("literature_id")
+                            if literature_id:
+                                literature_status = LiteratureProcessingStatus.COMPLETED
+                                execution_status = TaskExecutionStatus.COMPLETED
+                            else:
+                                literature_status = LiteratureProcessingStatus.FAILED
+                                execution_status = TaskExecutionStatus.FAILED
+                                error_message = "Task completed but no literature ID returned"
+                    else:
+                        literature_status = LiteratureProcessingStatus.FAILED
+                        execution_status = TaskExecutionStatus.FAILED
+                        error_message = str(result.result) if result.result else "Unknown error"
+
+            return TaskStatusDTO(
+                task_id=task_id,
+                execution_status=execution_status,
+                literature_status=literature_status,
+                literature_id=literature_id,
+                result_type=TaskResultType.LITERATURE_CREATED if literature_id else TaskResultType.TASK_ERROR,
+                progress=100 if execution_status == TaskExecutionStatus.COMPLETED else 50 if execution_status == TaskExecutionStatus.RUNNING else 0,
+                error_message=error_message,
+                created_at=None,  # Celery doesn't provide this easily
+                updated_at=None,  # Celery doesn't provide this easily
+            )
+
+        except Exception as e:
+            logger.error(f"Error getting task status for {task_id}: {e}")
+            # 即使出错也返回TaskStatusDTO而不是None
+            return TaskStatusDTO(
+                task_id=task_id,
+                execution_status=TaskExecutionStatus.FAILED,
+                literature_status=LiteratureProcessingStatus.FAILED,
+                literature_id=None,
+                result_type=TaskResultType.TASK_ERROR,
+                progress=0,
+                error_message=f"Failed to get task status: {str(e)}",
+                created_at=None,
+                updated_at=None,
+            )
 
 
 @router.get(
@@ -46,17 +128,11 @@ async def get_task_status(task_id: str) -> TaskStatusDTO:
         500: Internal server error
     """
     try:
-        # Import the existing status manager from the legacy task module
-        from .task import UnifiedStatusManager
-        
-        status_manager = UnifiedStatusManager()
+        # Use the simplified status manager
+        status_manager = SimpleStatusManager()
         task_status = await status_manager.get_unified_status(task_id)
         
-        if not task_status:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Task not found: {task_id}"
-            )
+        # 不再需要检查None，因为get_unified_status总是返回TaskStatusDTO
         
         logger.info(f"Task status retrieved: {task_id}")
         return task_status
@@ -106,20 +182,16 @@ async def stream_task_status(task_id: str) -> StreamingResponse:
         
         async def task_status_generator() -> AsyncGenerator[str, None]:
             """Generate SSE events for task status updates."""
-            from .task import UnifiedStatusManager
             import asyncio
             
-            status_manager = UnifiedStatusManager()
+            status_manager = SimpleStatusManager()
             previous_status = None
             
             while True:
                 try:
                     current_status = await status_manager.get_unified_status(task_id)
                     
-                    if not current_status:
-                        yield f"event: error\n"
-                        yield f"data: {json.dumps({'error': 'Task not found'})}\n\n"
-                        break
+                    # 不再检查None，直接使用current_status
                     
                     # Only send updates when status changes
                     if current_status != previous_status:

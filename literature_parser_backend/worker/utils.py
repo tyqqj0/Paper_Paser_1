@@ -60,6 +60,19 @@ def extract_authoritative_identifiers(
     primary_type = None
     url_validation_info = None
 
+    # 🔍 DEBUG: Log input data structure for troubleshooting
+    logger.info(f"🔍 [extract_authoritative_identifiers] Input source keys: {list(source.keys())}")
+    logger.info(f"🔍 [extract_authoritative_identifiers] Input source structure: {source}")
+    
+    # Check for nested identifiers structure (common issue after get_effective_values)
+    if "identifiers" in source:
+        logger.info(f"🔍 [extract_authoritative_identifiers] Found nested identifiers: {source['identifiers']}")
+        if isinstance(source["identifiers"], dict):
+            nested_doi = source["identifiers"].get("doi")
+            nested_arxiv = source["identifiers"].get("arxiv_id") 
+            if nested_doi or nested_arxiv:
+                logger.warning(f"⚠️ [extract_authoritative_identifiers] DETECTED NESTED IDENTIFIERS! This suggests get_effective_values() didn't flatten properly. DOI: {nested_doi}, ArXiv: {nested_arxiv}")
+
     # 🎯 优先级1：直接提供的DOI（最可靠）
     if source.get("doi"):
         identifiers.doi = source["doi"]
@@ -181,6 +194,23 @@ def extract_authoritative_identifiers(
             identifiers.arxiv_id = match.group(1).replace(".pdf", "")
             primary_type = "arxiv"
             logger.info(f"✅ 传统方法从URL提取到ArXiv ID: {identifiers.arxiv_id}")
+
+    # 🔍 DEBUG: Log final extraction results
+    final_doi = identifiers.doi
+    final_arxiv = identifiers.arxiv_id
+    final_fingerprint = identifiers.fingerprint
+    
+    logger.info(f"🔍 [extract_authoritative_identifiers] FINAL RESULTS:")
+    logger.info(f"  DOI: {final_doi}")
+    logger.info(f"  ArXiv ID: {final_arxiv}")
+    logger.info(f"  Fingerprint: {final_fingerprint}")
+    logger.info(f"  Primary type: {primary_type or 'unknown'}")
+    logger.info(f"  URL validation: {url_validation_info.get('status') if url_validation_info else 'not_performed'}")
+    
+    if not final_doi and not final_arxiv and not final_fingerprint:
+        logger.error(f"❌ [extract_authoritative_identifiers] NO IDENTIFIERS EXTRACTED! This will cause downstream issues.")
+        logger.error(f"   Source had keys: {list(source.keys())}")
+        logger.error(f"   Source: {source}")
 
     return identifiers, primary_type or "unknown", url_validation_info
 

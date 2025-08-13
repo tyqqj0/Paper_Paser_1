@@ -43,6 +43,10 @@ async def resolve_literature(
     try:
         effective_values = literature_data.get_effective_values()
 
+        # 🔍 DEBUG: Check data transformation
+        logger.info(f"📋 Original request data: {literature_data.model_dump()}")
+        logger.info(f"📋 Effective values: {effective_values}")
+
         if not any(
             key in effective_values
             for key in ["doi", "arxiv_id", "url", "pdf_url", "title"]

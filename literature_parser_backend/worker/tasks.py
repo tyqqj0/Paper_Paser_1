@@ -43,6 +43,117 @@ logger = logging.getLogger(__name__)
 
 
 # ===============================================
+# Metadata Quality Assessment
+# ===============================================
+
+def _evaluate_metadata_quality(metadata: Optional[MetadataModel], source: str) -> Dict[str, Any]:
+    """
+    Evaluate metadata quality with strict criteria.
+    
+    Returns quality assessment including:
+    - is_high_quality: bool - True if metadata is complete and reliable
+    - is_partial: bool - True if metadata has basic info but missing key fields  
+    - quality_score: int - Score from 0-100
+    - missing_fields: List[str] - List of missing critical fields
+    """
+    if not metadata:
+        return {
+            "is_high_quality": False,
+            "is_partial": False, 
+            "quality_score": 0,
+            "missing_fields": ["title", "authors", "year", "journal", "abstract"],
+            "assessment": "No metadata available"
+        }
+    
+    # Check if this is just fallback data (not from external APIs)
+    is_fallback_only = (
+        hasattr(metadata, 'source_priority') and 
+        metadata.source_priority and 
+        len(metadata.source_priority) == 1 and 
+        "fallback" in metadata.source_priority[0].lower()
+    )
+    
+    missing_fields = []
+    quality_score = 0
+    
+    # 🎯 Core Requirements Assessment
+    
+    # Title (Essential - 25 points)
+    if not metadata.title or metadata.title in ["Unknown Title", "Processing..."]:
+        missing_fields.append("title")
+    else:
+        quality_score += 25
+        
+    # Authors (Critical - 25 points)  
+    if not metadata.authors or len(metadata.authors) == 0:
+        missing_fields.append("authors")
+    else:
+        quality_score += 25
+        
+    # Publication Year (Important - 20 points)
+    if not metadata.year:
+        missing_fields.append("year") 
+    else:
+        quality_score += 20
+        
+    # Journal/Venue (Important - 15 points)
+    if not metadata.journal:
+        missing_fields.append("journal")
+    else:
+        quality_score += 15
+        
+    # Abstract (Valuable - 10 points)
+    if not metadata.abstract:
+        missing_fields.append("abstract")
+    else:
+        quality_score += 10
+        
+    # Keywords (Nice-to-have - 5 points)
+    if not metadata.keywords or len(metadata.keywords) == 0:
+        missing_fields.append("keywords")
+    else:
+        quality_score += 5
+        
+    # 🎯 Quality Thresholds
+    
+    # Penalize fallback-only data severely
+    if is_fallback_only:
+        quality_score = min(quality_score, 30)  # Cap at 30% for fallback data
+        
+    # High Quality: Complete metadata with all essential fields (80%+)
+    is_high_quality = (
+        quality_score >= 80 and 
+        not is_fallback_only and
+        "title" not in missing_fields and 
+        "authors" not in missing_fields
+    )
+    
+    # Partial Quality: Has title and at least one other important field (40-79%)
+    is_partial = (
+        quality_score >= 40 and 
+        not is_high_quality and
+        "title" not in missing_fields
+    )
+    
+    assessment = "high_quality" if is_high_quality else ("partial" if is_partial else "failed")
+    
+    logger.info(
+        f"Metadata quality assessment: {assessment} (score: {quality_score}/100, "
+        f"source: {source}, fallback_only: {is_fallback_only}, "
+        f"missing: {missing_fields})"
+    )
+    
+    return {
+        "is_high_quality": is_high_quality,
+        "is_partial": is_partial,
+        "quality_score": quality_score, 
+        "missing_fields": missing_fields,
+        "assessment": assessment,
+        "is_fallback_only": is_fallback_only
+    }
+
+
+# ===============================================
 # Task Status Management
 # ===============================================
 
@@ -337,8 +448,17 @@ async def _process_literature_async(
         logger.info(f"Task {task_id}: Deduplication completed. Existing ID: {existing_id}")
 
         # Extract identifiers for downstream processing
+        logger.info(f"Task {task_id}: 🔍 [DEBUG] About to extract identifiers from source")
+        logger.info(f"Task {task_id}: 🔍 [DEBUG] Source keys: {list(source.keys())}")
+        logger.info(f"Task {task_id}: 🔍 [DEBUG] Source data: {source}")
+        
         try:
-            identifiers, _, url_validation_info = extract_authoritative_identifiers(source)
+            identifiers, primary_type, url_validation_info = extract_authoritative_identifiers(source)
+            
+            logger.info(f"Task {task_id}: ✅ Identifier extraction completed")
+            logger.info(f"Task {task_id}: 🔍 [DEBUG] Extracted DOI: {identifiers.doi}")
+            logger.info(f"Task {task_id}: 🔍 [DEBUG] Extracted ArXiv ID: {identifiers.arxiv_id}")
+            logger.info(f"Task {task_id}: 🔍 [DEBUG] Primary type: {primary_type}")
 
             # 如果有URL验证信息，存储到任务状态中
             if url_validation_info:
@@ -476,8 +596,10 @@ async def _process_literature_async(
             metadata = metadata_result
             metadata_source = "未知来源"
 
-        # 检查元数据获取是否成功并更新状态
-        if metadata and metadata.title and metadata.title != "Unknown Title":
+        # 检查元数据获取是否成功并更新状态 - 使用严格的质量评估
+        metadata_quality_check = _evaluate_metadata_quality(metadata, metadata_source)
+        
+        if metadata_quality_check["is_high_quality"]:
             overall_status = await dao.update_enhanced_component_status(
                 literature_id=literature_id,
                 component="metadata",
@@ -488,7 +610,30 @@ async def _process_literature_async(
                 next_action=None,
             )
             logger.info(
-                f"Metadata fetch successful from {metadata_source}. Overall status: {overall_status}",
+                f"Metadata fetch successful from {metadata_source}. Quality: {metadata_quality_check['quality_score']}/100. Overall status: {overall_status}",
+            )
+        elif metadata_quality_check["is_partial"]:
+            # 部分成功：有基本信息但缺少重要字段
+            overall_status = await dao.update_enhanced_component_status(
+                literature_id=literature_id,
+                component="metadata",
+                status="partial",
+                stage="元数据部分获取",
+                progress=metadata_quality_check["quality_score"],
+                source=metadata_source or "未知来源",
+                error_info={
+                    "error_type": "PartialMetadataError",
+                    "error_message": f"元数据不完整: {', '.join(metadata_quality_check['missing_fields'])}",
+                    "error_details": {
+                        "missing_fields": metadata_quality_check["missing_fields"],
+                        "quality_score": metadata_quality_check["quality_score"],
+                        "attempted_sources": ["CrossRef", "Semantic Scholar", "GROBID"]
+                    }
+                },
+                next_action="尝试其他数据源获取完整元数据",
+            )
+            logger.warning(
+                f"Metadata partially successful from {metadata_source}. Missing: {metadata_quality_check['missing_fields']}. Overall status: {overall_status}",
             )
         else:
             error_info = {
@@ -779,6 +924,17 @@ async def _process_literature_async(
 def process_literature_task(self: Task, source: Dict[str, Any]) -> Dict[str, Any]:
     """Celery task entry point for literature processing."""
     try:
+        # 🔍 DEBUG: Check what data Worker receives from API
+        logger.info(f"📋 [WORKER] Task {self.request.id} received source data:")
+        logger.info(f"📋 [WORKER] Source keys: {list(source.keys()) if source else 'None'}")
+        logger.info(f"📋 [WORKER] Source data: {source}")
+        
+        # Check specific identifiers field
+        if 'identifiers' in source:
+            logger.info(f"📋 [WORKER] Identifiers field: {source['identifiers']}")
+        else:
+            logger.info(f"📋 [WORKER] ❌ No 'identifiers' field in source data!")
+            
         # Important: run the async function and get the dictionary result
         result_dict = asyncio.run(_process_literature_async(self.request.id, source))
         return result_dict

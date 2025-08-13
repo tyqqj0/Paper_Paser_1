@@ -549,7 +549,7 @@ class LiteratureDAO(BaseNeo4jDAO):
             return self._error_status_response(literature_id, component, str(e))
     
     def _calculate_overall_status(self, component_status: Dict[str, Any]) -> str:
-        """Calculate overall task status based on component statuses."""
+        """Calculate overall task status based on component statuses with partial support."""
         statuses = []
         for comp_name, comp_data in component_status.items():
             if isinstance(comp_data, dict):
@@ -562,16 +562,43 @@ class LiteratureDAO(BaseNeo4jDAO):
         if "failed" in statuses:
             return "failed"
         
-        # If all critical components (metadata, references) are success, overall is completed
+        # Check critical components status (metadata is required, others are optional)
         metadata_status = component_status.get("metadata", {}).get("status", "pending")
+        content_status = component_status.get("content", {}).get("status", "pending")
         references_status = component_status.get("references", {}).get("status", "pending")
         
-        if metadata_status == "success" and references_status == "success":
-            return "completed"
+        # 🎯 NEW: Support partial metadata as acceptable for task completion
+        metadata_acceptable = metadata_status in ["success", "partial"]
+        
+        # Task is completed if:
+        # 1. Metadata is acceptable (success or partial) AND
+        # 2. References succeeded (content is optional)
+        if metadata_acceptable:
+            # If all components finished processing (success/partial/failed)
+            all_finished = all(status in ["success", "partial", "failed"] for status in statuses)
+            
+            if all_finished:
+                # 🎯 PRIMARY SUCCESS: metadata good + references succeeded  
+                # (content is optional per user requirements)
+                if references_status in ["success", "partial"]:
+                    return "completed"
+                    
+                # 🔄 PARTIAL SUCCESS: metadata good but references failed
+                # Still valuable if we have good metadata, may retry references later
+                elif metadata_status == "success":
+                    return "partial_completed"  # Has good metadata, can be useful
+                    
+                # 🔢 MINIMAL SUCCESS: only partial metadata, references failed  
+                else:
+                    return "minimal_completed"  # Basic info only
         
         # If any component is still processing, overall is processing
         if "processing" in statuses:
             return "processing"
+            
+        # If metadata failed, task failed
+        if metadata_status == "failed":
+            return "failed"
         
         # Default to processing
         return "processing"
