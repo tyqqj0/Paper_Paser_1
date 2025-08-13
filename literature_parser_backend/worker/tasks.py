@@ -713,6 +713,29 @@ async def _process_literature_async(
                 logger.info(
                     f"References fetch successful ({len(references)} refs) from {references_source}. Overall status: {overall_status}",
                 )
+                
+                # 🎯 NEW: Citation Relationship Resolution
+                logger.info(f"Task {task_id}: Starting citation relationship resolution")
+                try:
+                    from literature_parser_backend.worker.citation_resolver import CitationResolver
+                    
+                    # Initialize citation resolver
+                    citation_resolver = CitationResolver(task_id=task_id)
+                    await citation_resolver.initialize_with_dao(dao)
+                    
+                    # Resolve citations and create relationships
+                    resolution_result = await citation_resolver.resolve_citations_for_literature(
+                        citing_literature_lid=literature_id,
+                        references=references
+                    )
+                    
+                    stats = resolution_result["statistics"]
+                    logger.info(f"Task {task_id}: Citation resolution completed - {stats['resolved_citations']} resolved, {stats['unresolved_references']} unresolved (rate: {stats['resolution_rate']:.2f})")
+                    
+                except Exception as e:
+                    logger.error(f"Task {task_id}: Citation resolution failed: {e}")
+                    # Don't fail the entire task for citation resolution errors
+                    # This is a enhancement feature, not critical
             else:
                 # Note: References failure is now critical
                 error_info = {

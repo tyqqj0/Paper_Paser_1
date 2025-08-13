@@ -522,3 +522,248 @@ class RelationshipDAO(BaseNeo4jDAO):
                 
         except Exception as e:
             logger.error(f"Failed to ensure relationship indexes: {e}")
+
+
+    # ========== Citation Relationship Management ==========
+
+    async def create_citation_relationship(
+        self,
+        citing_lid: str,
+        cited_lid: str,
+        relationship_data: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """
+        Create a :CITES relationship between two literature nodes.
+        
+        Args:
+            citing_lid: LID of the literature that cites
+            cited_lid: LID of the literature being cited
+            relationship_data: Additional relationship properties
+            
+        Returns:
+            True if relationship created successfully
+        """
+        try:
+            async with self._get_session() as session:
+                # Prepare relationship properties
+                props = {
+                    "created_at": datetime.now().isoformat(),
+                    "source": "citation_resolver"
+                }
+                
+                if relationship_data:
+                    props.update(relationship_data)
+                
+                # Create the CITES relationship
+                query = """
+                MATCH (citing:Literature {lid: $citing_lid})
+                MATCH (cited:Literature {lid: $cited_lid})
+                MERGE (citing)-[r:CITES]->(cited)
+                ON CREATE SET r += $props
+                RETURN r.created_at as created_at
+                """
+                
+                result = await session.run(
+                    query,
+                    citing_lid=citing_lid,
+                    cited_lid=cited_lid,
+                    props=props
+                )
+                
+                record = await result.single()
+                if record:
+                    logger.debug(f"✅ Created CITES relationship: {citing_lid} → {cited_lid}")
+                    return True
+                else:
+                    logger.warning(f"❌ Failed to create CITES relationship: {citing_lid} → {cited_lid}")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"Error creating citation relationship {citing_lid} → {cited_lid}: {e}")
+            return False
+
+    async def create_unresolved_citation(
+        self,
+        citing_lid: str,
+        placeholder_lid: str,
+        reference_data: Dict[str, Any]
+    ) -> bool:
+        """
+        Create an :Unresolved placeholder node and :CITES relationship.
+        
+        Args:
+            citing_lid: LID of the literature that cites
+            placeholder_lid: Generated LID for the placeholder
+            reference_data: Raw reference data and metadata
+            
+        Returns:
+            True if placeholder and relationship created successfully
+        """
+        try:
+            async with self._get_session() as session:
+                # Prepare node properties (flatten complex objects for Neo4j)
+                node_props = {
+                    "lid": placeholder_lid,
+                    "created_at": datetime.now().isoformat(),
+                    "source": "citation_resolver",
+                    "status": "unresolved"
+                }
+                
+                # Add parsed reference data (flatten complex structures)
+                if "raw_text" in reference_data:
+                    node_props["raw_text"] = str(reference_data["raw_text"])
+                
+                if "parsed_data" in reference_data and reference_data["parsed_data"]:
+                    # Flatten parsed_data by converting to JSON string or extracting key fields
+                    parsed_data = reference_data["parsed_data"]
+                    if isinstance(parsed_data, dict):
+                        # Extract common fields as direct properties
+                        if "title" in parsed_data:
+                            node_props["parsed_title"] = str(parsed_data["title"])
+                        if "authors" in parsed_data:
+                            node_props["parsed_authors"] = str(parsed_data["authors"]) if parsed_data["authors"] else ""
+                        if "year" in parsed_data:
+                            node_props["parsed_year"] = str(parsed_data["year"]) if parsed_data["year"] else ""
+                        # Store full parsed data as JSON string
+                        import json
+                        node_props["parsed_data_json"] = json.dumps(parsed_data, ensure_ascii=False)
+                
+                # No additional cleaning needed - all values are now primitive types
+                cleaned_props = node_props
+                
+                # Create placeholder node and relationship
+                query = """
+                MATCH (citing:Literature {lid: $citing_lid})
+                MERGE (unresolved:Unresolved {lid: $placeholder_lid})
+                ON CREATE SET unresolved = $node_props
+                MERGE (citing)-[r:CITES]->(unresolved)
+                ON CREATE SET r.created_at = $created_at, r.source = 'citation_resolver'
+                RETURN unresolved.lid as placeholder_lid, r.created_at as rel_created
+                """
+                
+                result = await session.run(
+                    query,
+                    citing_lid=citing_lid,
+                    placeholder_lid=placeholder_lid,
+                    node_props=cleaned_props,
+                    created_at=datetime.now().isoformat()
+                )
+                
+                record = await result.single()
+                if record:
+                    logger.debug(f"✅ Created unresolved placeholder: {citing_lid} → {placeholder_lid}")
+                    return True
+                else:
+                    logger.warning(f"❌ Failed to create unresolved placeholder: {citing_lid} → {placeholder_lid}")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"Error creating unresolved citation {citing_lid} → {placeholder_lid}: {e}")
+            return False
+
+    async def upgrade_unresolved_to_literature(
+        self,
+        placeholder_lid: str,
+        literature_lid: str
+    ) -> Dict[str, Any]:
+        """
+        Upgrade an :Unresolved placeholder to point to a real :Literature node.
+        
+        This is called when a literature matching the placeholder is added to the system.
+        
+        Args:
+            placeholder_lid: LID of the placeholder node
+            literature_lid: LID of the real literature node
+            
+        Returns:
+            Dictionary with upgrade statistics
+        """
+        try:
+            async with self._get_session() as session:
+                # Find all relationships pointing to the placeholder
+                find_query = """
+                MATCH (citing:Literature)-[old_rel:CITES]->(placeholder:Unresolved {lid: $placeholder_lid})
+                MATCH (literature:Literature {lid: $literature_lid})
+                RETURN citing.lid as citing_lid, COUNT(*) as relationship_count
+                """
+                
+                find_result = await session.run(
+                    find_query,
+                    placeholder_lid=placeholder_lid,
+                    literature_lid=literature_lid
+                )
+                
+                citing_lids = []
+                total_relationships = 0
+                
+                async for record in find_result:
+                    citing_lids.append(record["citing_lid"])
+                    total_relationships += record["relationship_count"]
+                
+                if not citing_lids:
+                    logger.info(f"No relationships found for placeholder {placeholder_lid}")
+                    return {"upgraded_relationships": 0, "citing_lids": []}
+                
+                # Upgrade relationships to point to real literature
+                upgrade_query = """
+                MATCH (citing:Literature)-[old_rel:CITES]->(placeholder:Unresolved {lid: $placeholder_lid})
+                MATCH (literature:Literature {lid: $literature_lid})
+                
+                // Create new relationship to literature
+                MERGE (citing)-[new_rel:CITES]->(literature)
+                ON CREATE SET 
+                    new_rel.created_at = old_rel.created_at,
+                    new_rel.source = old_rel.source,
+                    new_rel.confidence = old_rel.confidence,
+                    new_rel.upgraded_from = $placeholder_lid,
+                    new_rel.upgraded_at = $upgraded_at
+                
+                // Delete old relationship and placeholder if no other refs
+                DELETE old_rel
+                
+                WITH placeholder, COUNT(old_rel) as deleted_count
+                WHERE NOT (()-[:CITES]->(placeholder))
+                DELETE placeholder
+                
+                RETURN deleted_count
+                """
+                
+                upgrade_result = await session.run(
+                    upgrade_query,
+                    placeholder_lid=placeholder_lid,
+                    literature_lid=literature_lid,
+                    upgraded_at=datetime.now().isoformat()
+                )
+                
+                upgrade_record = await upgrade_result.single()
+                deleted_count = upgrade_record["deleted_count"] if upgrade_record else 0
+                
+                logger.info(f"✅ Upgraded {len(citing_lids)} relationships from placeholder {placeholder_lid} to literature {literature_lid}")
+                
+                return {
+                    "upgraded_relationships": len(citing_lids),
+                    "citing_lids": citing_lids,
+                    "deleted_placeholder": deleted_count > 0
+                }
+                
+        except Exception as e:
+            logger.error(f"Error upgrading unresolved citation {placeholder_lid} → {literature_lid}: {e}")
+            return {"upgraded_relationships": 0, "citing_lids": [], "error": str(e)}
+
+    async def get_unresolved_count(self) -> int:
+        """
+        Get the total number of unresolved placeholder nodes.
+        
+        Returns:
+            Number of :Unresolved nodes in the database
+        """
+        try:
+            async with self._get_session() as session:
+                query = "MATCH (u:Unresolved) RETURN COUNT(u) as count"
+                result = await session.run(query)
+                record = await result.single()
+                return record["count"] if record else 0
+                
+        except Exception as e:
+            logger.error(f"Error getting unresolved count: {e}")
+            return 0

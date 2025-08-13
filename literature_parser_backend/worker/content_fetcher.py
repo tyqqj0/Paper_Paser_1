@@ -188,6 +188,7 @@ class ContentFetcher:
         logger.info(f"Attempting to download ArXiv PDF from: {arxiv_pdf_url}")
 
         try:
+            from ..services.request_manager import RequestType
             response = self.request_manager.get(
                 url=arxiv_pdf_url,
                 request_type=RequestType.EXTERNAL,

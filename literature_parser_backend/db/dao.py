@@ -87,6 +87,45 @@ class LiteratureDAO(BaseNeo4jDAO):
             logger.error(f"Failed to find literature by LID {lid}: {e}")
             return None
 
+    async def get_all_literature(self, limit: int = 1000) -> List[LiteratureModel]:
+        """
+        Get all literature nodes for matching purposes.
+        
+        WARNING: This is for development/testing. In production, this should be 
+        optimized with pre-filtering based on search criteria.
+        
+        Args:
+            limit: Maximum number of literature to return
+            
+        Returns:
+            List of literature models
+        """
+        try:
+            async with self._get_session() as session:
+                query = """
+                MATCH (lit:Literature)
+                WHERE lit.lid IS NOT NULL
+                RETURN lit
+                ORDER BY lit.created_at DESC
+                LIMIT $limit
+                """
+                
+                result = await session.run(query, limit=limit)
+                
+                literatures = []
+                async for record in result:
+                    lit_data = dict(record["lit"])
+                    literature = await self._neo4j_record_to_model(lit_data)
+                    if literature:
+                        literatures.append(literature)
+                        
+                logger.debug(f"Retrieved {len(literatures)} literature for matching")
+                return literatures
+                
+        except Exception as e:
+            logger.error(f"Error getting all literature: {e}")
+            return []
+
     async def find_by_doi(self, doi: str) -> Optional[LiteratureModel]:
         """Find literature by DOI."""
         try:
