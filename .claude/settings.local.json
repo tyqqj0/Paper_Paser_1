@@ -13,8 +13,10 @@
       "Bash(docker-compose up:*)",
       "Bash(sudo docker-compose:*)",
       "Bash(groups $USER)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(sudo docker compose:*)"
     ],
-    "deny": []
+    "deny": [],
+    "defaultMode": "acceptEdits"
   }
 }

@@ -459,7 +459,22 @@ class LiteratureDAO(BaseNeo4jDAO):
             
             temp_refs = parse_json_field(node.get("temp_references"))
             if temp_refs and isinstance(temp_refs, list):
-                data["references"] = [ReferenceModel(**ref) for ref in temp_refs]
+                for ref in temp_refs:
+                    try:
+                        # Handle both string (JSON) and dict formats
+                        if isinstance(ref, str):
+                            ref_dict = json.loads(ref)
+                        elif isinstance(ref, dict):
+                            ref_dict = ref
+                        else:
+                            continue  # Skip invalid reference
+                        
+                        references.append(ReferenceModel(**ref_dict))
+                    except Exception as e:
+                        logger.warning(f"Failed to parse reference: {e}")
+                        continue  # Skip invalid reference
+                
+                data["references"] = references
             else:
                 data["references"] = []
             

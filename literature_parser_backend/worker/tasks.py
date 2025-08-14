@@ -755,6 +755,21 @@ async def _process_literature_async(
             logger.info(
                 f"Metadata fetch successful from {metadata_source}. Quality: {metadata_quality_check['quality_score']}/100. Overall status: {overall_status}",
             )
+            
+            # 🆕 重要修复：更新identifiers以便引用获取使用
+            # 如果元数据中包含新的标识符信息，更新到identifiers变量中
+            if metadata and hasattr(metadata, 'doi') and metadata.doi and not identifiers.doi:
+                logger.info(f"Task {task_id}: 🔄 更新DOI到identifiers: {metadata.doi}")
+                identifiers.doi = metadata.doi
+            
+            # 检查是否有ArXiv ID（如果元数据中包含external IDs）
+            if hasattr(metadata, 'external_ids') and metadata.external_ids:
+                if 'ArXiv' in metadata.external_ids and not identifiers.arxiv_id:
+                    arxiv_id = metadata.external_ids['ArXiv']
+                    logger.info(f"Task {task_id}: 🔄 更新ArXiv ID到identifiers: {arxiv_id}")
+                    identifiers.arxiv_id = arxiv_id
+            
+            logger.info(f"Task {task_id}: 🔍 [DEBUG] 更新后的标识符: DOI={identifiers.doi}, ArXiv={identifiers.arxiv_id}")
         elif metadata_quality_check["is_partial"]:
             # 部分成功：有基本信息但缺少重要字段
             overall_status = await dao.update_enhanced_component_status(
@@ -778,6 +793,19 @@ async def _process_literature_async(
             logger.warning(
                 f"Metadata partially successful from {metadata_source}. Missing: {metadata_quality_check['missing_fields']}. Overall status: {overall_status}",
             )
+            
+            # 🆕 即使是部分成功，也要更新标识符信息
+            if metadata and hasattr(metadata, 'doi') and metadata.doi and not identifiers.doi:
+                logger.info(f"Task {task_id}: 🔄 [部分成功] 更新DOI到identifiers: {metadata.doi}")
+                identifiers.doi = metadata.doi
+            
+            if hasattr(metadata, 'external_ids') and metadata.external_ids:
+                if 'ArXiv' in metadata.external_ids and not identifiers.arxiv_id:
+                    arxiv_id = metadata.external_ids['ArXiv']
+                    logger.info(f"Task {task_id}: 🔄 [部分成功] 更新ArXiv ID到identifiers: {arxiv_id}")
+                    identifiers.arxiv_id = arxiv_id
+            
+            logger.info(f"Task {task_id}: 🔍 [DEBUG] [部分成功] 更新后的标识符: DOI={identifiers.doi}, ArXiv={identifiers.arxiv_id}")
         else:
             error_info = {
                 "error_type": "MetadataFetchError",

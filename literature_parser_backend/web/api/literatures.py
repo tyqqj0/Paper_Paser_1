@@ -428,7 +428,7 @@ async def get_literature_by_lid(lid: str) -> LiteratureSummaryDTO:
         500: Internal server error
     """
     try:
-        dao = LiteratureDAO()
+        dao = LiteratureDAO.create_from_global_connection()
         
         # Find by LID using Neo4j DAO
         literature = await dao.find_by_lid(lid)
@@ -534,7 +534,7 @@ async def get_literatures_batch(
 
         logger.info(f"Batch literature request for {len(lid_list)} LIDs")
 
-        dao = LiteratureDAO()
+        dao = LiteratureDAO.create_from_global_connection()
         results = []
         
         for lid in lid_list:

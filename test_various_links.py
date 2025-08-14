@@ -210,7 +210,13 @@ class ComprehensiveTester:
                             await asyncio.sleep(2)
                             continue
                     else:
-                        print(f"   ⚠️  查询状态失败: HTTP {response.status}")
+                        try:
+                            error_json = await response.json()
+                            print(f"   ⚠️  查询状态失败: HTTP {response.status}, 响应: {json.dumps(error_json, indent=2)}")
+                            print(f"   ⚠️  完整响应: {await response.text()}")
+                        except Exception:
+                            error_text = await response.text()
+                            print(f"   ⚠️  查询状态失败: HTTP {response.status}, 响应: {error_text}")
                         await asyncio.sleep(2)
                         continue
                         

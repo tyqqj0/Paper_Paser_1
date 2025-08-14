@@ -13,7 +13,7 @@ from urllib.parse import quote
 from ....models.literature import AuthorModel, MetadataModel
 from ....services.crossref import CrossRefClient
 from ....services.request_manager import ExternalRequestManager, RequestType
-from ....utils.title_matching import TitleMatchingUtils
+from ....utils.title_matching import TitleMatchingUtils, MatchingMode
 from ..base import IdentifierData, MetadataProcessor, ProcessorResult, ProcessorType
 
 logger = logging.getLogger(__name__)
@@ -23,8 +23,13 @@ class CrossRefProcessor(MetadataProcessor):
     """
     CrossRef元数据处理器。
     
-    整合现有的DOI查询和标题搜索功能，使用简化的过滤逻辑。
+    整合现有的DOI查询和标题搜索功能，使用精确匹配模式避免错误关联。
     优先级：5（主要API服务之一）
+    
+    特点：
+    - DOI查询：最高精度
+    - 标题搜索：使用STRICT模式，只接受极高相似度匹配（>98%）
+    - 避免匹配相似但错误的论文（如"Is Attention All You Need?"）
     """
     
     def __init__(self, settings=None):
@@ -185,11 +190,11 @@ class CrossRefProcessor(MetadataProcessor):
             
             logger.info(f"🔍 CrossRef返回{len(candidates)}个候选结果")
             
-            # 2. 使用统一标题匹配工具进行过滤
+            # 2. 使用统一标题匹配工具进行精确过滤
             filtered_results = TitleMatchingUtils.filter_crossref_candidates(
                 target_title=title,
                 candidates=candidates,
-                similarity_threshold=0.8  # 使用相对宽松的阈值
+                mode=MatchingMode.STRICT  # 🆕 使用精确模式，避免错误匹配
             )
             
             if not filtered_results:

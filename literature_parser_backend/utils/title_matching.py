@@ -2,20 +2,28 @@
 """
 统一的标题匹配工具类 - Paper Parser 0.2
 
-整合现有的多个标题匹配实现，提供：
-- 标准化的标题预处理
-- 简单的严格匹配（用于CrossRef过滤）
-- 复杂的相似度计算（用于智能匹配）
-- 统一的匹配接口
+提供分级匹配策略：
+- 精确模式（CrossRef）：严格匹配，避免错误关联
+- 标准模式（一般情况）：平衡精度和召回率
+- 模糊模式（Semantic Scholar）：宽松匹配，提高召回率
+- 统一的标准化和接口
 """
 
 import re
 import hashlib
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Set, Tuple
+from enum import Enum
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+class MatchingMode(Enum):
+    """标题匹配模式枚举"""
+    STRICT = "strict"      # 精确模式 - CrossRef等权威数据库
+    STANDARD = "standard"  # 标准模式 - 一般场景
+    FUZZY = "fuzzy"       # 模糊模式 - Semantic Scholar等
 
 
 class TitleMatchingUtils:
@@ -187,20 +195,83 @@ class TitleMatchingUtils:
         return TitleMatchingUtils.calculate_jaccard_similarity(title1, title2)
     
     @staticmethod
+    def calculate_similarity_by_mode(title1: str, title2: str, mode: MatchingMode = MatchingMode.STANDARD) -> float:
+        """
+        根据匹配模式计算相似度。
+        
+        Args:
+            title1: 第一个标题
+            title2: 第二个标题
+            mode: 匹配模式
+            
+        Returns:
+            相似度分数 (0.0 - 1.0)
+        """
+        if mode == MatchingMode.STRICT:
+            # 精确模式：严格匹配优先，然后是极高相似度
+            if TitleMatchingUtils.is_exact_match(title1, title2):
+                return 1.0
+            else:
+                # 对于精确模式，只有序列相似度>0.95的才认为可能匹配
+                sequence_sim = TitleMatchingUtils.calculate_sequence_similarity(title1, title2)
+                return sequence_sim if sequence_sim > 0.95 else 0.0
+                
+        elif mode == MatchingMode.FUZZY:
+            # 模糊模式：使用组合相似度，但权重向Jaccard倾斜
+            sequence_sim = TitleMatchingUtils.calculate_sequence_similarity(title1, title2)
+            jaccard_sim = TitleMatchingUtils.calculate_jaccard_similarity(title1, title2)
+            
+            # 权重组合：序列相似度40% + Jaccard相似度60%（模糊模式更重视词汇重叠）
+            return (0.4 * sequence_sim) + (0.6 * jaccard_sim)
+            
+        else:  # STANDARD
+            # 标准模式：平衡的组合相似度
+            return TitleMatchingUtils.calculate_combined_similarity(title1, title2)
+    
+    @staticmethod
+    def is_acceptable_match(title1: str, title2: str, mode: MatchingMode = MatchingMode.STANDARD, 
+                           custom_threshold: Optional[float] = None) -> bool:
+        """
+        判断两个标题是否为可接受的匹配。
+        
+        Args:
+            title1: 第一个标题
+            title2: 第二个标题
+            mode: 匹配模式
+            custom_threshold: 自定义阈值，如果不提供则使用模式默认值
+            
+        Returns:
+            True if 匹配可接受
+        """
+        similarity = TitleMatchingUtils.calculate_similarity_by_mode(title1, title2, mode)
+        
+        # 根据模式设定不同的默认阈值
+        if custom_threshold is not None:
+            threshold = custom_threshold
+        elif mode == MatchingMode.STRICT:
+            threshold = 0.98  # 精确模式：只接受极高相似度
+        elif mode == MatchingMode.FUZZY:
+            threshold = 0.6   # 模糊模式：较低阈值
+        else:  # STANDARD
+            threshold = 0.8   # 标准模式：中等阈值
+        
+        return similarity >= threshold
+    
+    @staticmethod
     def filter_crossref_candidates(
         target_title: str, 
         candidates: List[Dict[str, Any]],
-        similarity_threshold: float = 0.8
+        mode: MatchingMode = MatchingMode.STRICT,
+        custom_threshold: Optional[float] = None
     ) -> List[Tuple[Dict[str, Any], float]]:
         """
-        过滤CrossRef候选结果，只保留高相似度的结果。
-        
-        简化的过滤逻辑，替代复杂的评分系统。
+        过滤CrossRef候选结果，使用分级匹配策略。
         
         Args:
             target_title: 目标标题
             candidates: CrossRef返回的候选列表
-            similarity_threshold: 相似度阈值，默认0.8
+            mode: 匹配模式，默认STRICT（精确模式）
+            custom_threshold: 自定义阈值，如果不提供则使用模式默认值
             
         Returns:
             (候选项, 相似度分数) 的列表，按相似度降序排列
@@ -212,8 +283,19 @@ class TitleMatchingUtils:
         if not target_normalized:
             return []
             
+        # 根据模式确定阈值
+        if custom_threshold is not None:
+            threshold = custom_threshold
+        elif mode == MatchingMode.STRICT:
+            threshold = 0.98  # 精确模式：极高阈值
+        elif mode == MatchingMode.FUZZY:
+            threshold = 0.6   # 模糊模式：低阈值
+        else:  # STANDARD
+            threshold = 0.8   # 标准模式：中等阈值
+            
         logger.info(f"🎯 过滤CrossRef结果: 目标标题='{target_title}'")
         logger.info(f"🎯 标准化后: '{target_normalized}'")
+        logger.info(f"🎯 匹配模式: {mode.value}, 阈值: {threshold}")
         
         filtered_results = []
         
@@ -230,28 +312,27 @@ class TitleMatchingUtils:
                 logger.debug(f"候选{i+1}: 无标题，跳过")
                 continue
                 
-            candidate_normalized = TitleMatchingUtils.normalize_title(candidate_title)
+            # 使用新的匹配模式计算相似度
+            similarity = TitleMatchingUtils.calculate_similarity_by_mode(target_title, candidate_title, mode)
             
-            # 检查严格匹配
+            # 特殊处理严格匹配
             if TitleMatchingUtils.is_exact_match(target_title, candidate_title):
                 similarity = 1.0
                 logger.info(f"🎯 候选{i+1}: 严格匹配 '{candidate_title}' (1.00)")
             else:
-                # 计算相似度
-                similarity = TitleMatchingUtils.calculate_simple_similarity(target_title, candidate_title)
-                logger.debug(f"候选{i+1}: '{candidate_title}' 相似度={similarity:.3f}")
+                logger.debug(f"候选{i+1}: '{candidate_title}' 相似度={similarity:.3f} (模式: {mode.value})")
             
             # 应用阈值过滤
-            if similarity >= similarity_threshold:
+            if similarity >= threshold:
                 filtered_results.append((candidate, similarity))
                 logger.info(f"✅ 通过过滤: '{candidate_title}' (相似度={similarity:.3f})")
             else:
-                logger.debug(f"❌ 未通过过滤: '{candidate_title}' (相似度={similarity:.3f} < {similarity_threshold})")
+                logger.debug(f"❌ 未通过过滤: '{candidate_title}' (相似度={similarity:.3f} < {threshold})")
         
         # 按相似度降序排列
         filtered_results.sort(key=lambda x: x[1], reverse=True)
         
-        logger.info(f"🎯 过滤结果: {len(filtered_results)}/{len(candidates)} 候选通过阈值 {similarity_threshold}")
+        logger.info(f"🎯 过滤结果: {len(filtered_results)}/{len(candidates)} 候选通过阈值 {threshold} (模式: {mode.value})")
         
         return filtered_results
     
@@ -313,6 +394,7 @@ if __name__ == "__main__":
         "ImageNet classification with deep convolutional neural networks!",
         "IMAGENET CLASSIFICATION WITH DEEP CONVOLUTIONAL NEURAL NETWORKS",
         "ImageNet Classification using Deep CNNs",
+        "Is ImageNet Classification All You Need?",  # 相似但错误的标题
         "A Different Paper Title Entirely"
     ]
     
@@ -323,22 +405,19 @@ if __name__ == "__main__":
     print(f"LID: {TitleMatchingUtils.generate_title_based_lid(base_title)}")
     print()
     
-    print("相似度测试:")
-    print("-" * 40)
+    print("分级匹配模式测试:")
+    print("-" * 60)
     
     for title in test_titles[1:]:
-        is_exact = TitleMatchingUtils.is_exact_match(base_title, title)
-        jaccard = TitleMatchingUtils.calculate_jaccard_similarity(base_title, title)
-        sequence = TitleMatchingUtils.calculate_sequence_similarity(base_title, title)
-        combined = TitleMatchingUtils.calculate_combined_similarity(base_title, title)
-        simple = TitleMatchingUtils.calculate_simple_similarity(base_title, title)
-        
         print(f"对比标题: {title}")
-        print(f"  严格匹配: {is_exact}")
-        print(f"  Jaccard: {jaccard:.3f}")
-        print(f"  序列相似度: {sequence:.3f}")
-        print(f"  组合相似度: {combined:.3f}")
-        print(f"  简单相似度: {simple:.3f}")
+        
+        # 测试不同模式
+        for mode in [MatchingMode.STRICT, MatchingMode.STANDARD, MatchingMode.FUZZY]:
+            similarity = TitleMatchingUtils.calculate_similarity_by_mode(base_title, title, mode)
+            is_acceptable = TitleMatchingUtils.is_acceptable_match(base_title, title, mode)
+            
+            print(f"  {mode.value:8}: 相似度={similarity:.3f}, 可接受={is_acceptable}")
+        
         print()
 
 

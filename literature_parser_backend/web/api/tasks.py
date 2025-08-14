@@ -12,7 +12,7 @@ from typing import Dict, AsyncGenerator, Optional
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 
-from literature_parser_backend.models.task import TaskStatusDTO, TaskExecutionStatus, TaskResultType, LiteratureProcessingStatus
+from literature_parser_backend.models.task import TaskStatusDTO, TaskExecutionStatus, TaskResultType, LiteratureProcessingStatus, TaskErrorInfo
 from literature_parser_backend.worker.celery_app import celery_app
 from literature_parser_backend.db.dao import LiteratureDAO
 
@@ -24,7 +24,7 @@ class SimpleStatusManager:
     """简化的状态管理器 - 替代已删除的UnifiedStatusManager"""
 
     def __init__(self):
-        self.dao = LiteratureDAO()
+        self.dao = LiteratureDAO.create_from_global_connection()
 
     def _map_celery_status(self, celery_status: str, task_info: dict = None) -> TaskExecutionStatus:
         """映射Celery状态到标准任务执行状态"""
@@ -32,10 +32,10 @@ class SimpleStatusManager:
         
         status_mapping = {
             "PENDING": TaskExecutionStatus.PENDING,
-            "STARTED": TaskExecutionStatus.RUNNING,
+            "STARTED": TaskExecutionStatus.PROCESSING,
             "SUCCESS": TaskExecutionStatus.COMPLETED,
             "FAILURE": TaskExecutionStatus.FAILED,
-            "RETRY": TaskExecutionStatus.RUNNING,
+            "RETRY": TaskExecutionStatus.PROCESSING,
             "REVOKED": TaskExecutionStatus.FAILED,
         }
         
@@ -48,56 +48,104 @@ class SimpleStatusManager:
             result = celery_app.AsyncResult(task_id)
             
             execution_status = TaskExecutionStatus.PENDING
-            literature_status = LiteratureProcessingStatus.PENDING
-            literature_id = None
-            error_message = None
+            literature_status_obj: Optional[LiteratureProcessingStatus] = None
+            literature_id: Optional[str] = None
+            error_message: Optional[str] = None
+            result_type: Optional[TaskResultType] = None
+            task_result: Optional[dict] = None
+            overall_progress = 0
+            current_stage = "任务正在等待"
 
             if result:
                 execution_status = self._map_celery_status(result.status)
-
-                # 获取任务结果
                 if result.ready():
                     if result.successful():
                         task_result = result.get()
                         if isinstance(task_result, dict):
                             literature_id = task_result.get("lid") or task_result.get("literature_id")
-                            if literature_id:
-                                literature_status = LiteratureProcessingStatus.COMPLETED
-                                execution_status = TaskExecutionStatus.COMPLETED
-                            else:
-                                literature_status = LiteratureProcessingStatus.FAILED
-                                execution_status = TaskExecutionStatus.FAILED
-                                error_message = "Task completed but no literature ID returned"
+                            result_type_str = task_result.get("result_type")
+                            result_type = TaskResultType(result_type_str) if result_type_str else None
+                            execution_status = TaskExecutionStatus.COMPLETED
+                            overall_progress = 100
+                            current_stage = "处理完成"
+                        else:
+                            execution_status = TaskExecutionStatus.FAILED
+                            error_message = "Task completed but returned unexpected result type"
                     else:
-                        literature_status = LiteratureProcessingStatus.FAILED
                         execution_status = TaskExecutionStatus.FAILED
                         error_message = str(result.result) if result.result else "Unknown error"
+                else: # 任务未就绪
+                    execution_status = TaskExecutionStatus.PROCESSING
+                    current_stage = "任务正在处理中"
+                    overall_progress = 50 # 默认处理中为50%
 
+            # 如果有文献ID，从数据库获取详细状态
+            if literature_id:
+                literature = await self.dao.find_by_lid(literature_id)
+                if literature and literature.task_info:
+                    task_info = literature.task_info
+                    # 使用TaskInfoModel创建LiteratureProcessingStatus
+                    literature_status_obj = LiteratureProcessingStatus(
+                        literature_id=literature.lid,
+                        overall_status=task_info.status,
+                        overall_progress=task_info.component_status.get_overall_progress(),
+                        component_status=task_info.component_status,
+                        created_at=literature.created_at,
+                        updated_at=literature.updated_at
+                    )
+                    overall_progress = literature_status_obj.overall_progress
+                    
+                    # --- Start of inlined get_current_stage_display logic ---
+                    if task_info.status == "completed":
+                        current_stage = "处理完成"
+                    elif task_info.status == "failed":
+                        current_stage = f"处理失败: {task_info.error_message or '未知错误'}"
+                    elif task_info.component_status.references.status.value == "processing":
+                        current_stage = task_info.component_status.references.stage
+                    elif task_info.component_status.content.status.value == "processing":
+                        current_stage = task_info.component_status.content.stage
+                    elif task_info.component_status.metadata.status.value == "processing":
+                        current_stage = task_info.component_status.metadata.stage
+                    else:
+                        current_stage = "任务正在队列中等待"
+                    # --- End of inlined get_current_stage_display logic ---
+
+            error_info = None
+            if error_message:
+                error_info = TaskErrorInfo(
+                    error_type="CeleryTaskError",
+                    error_message=error_message
+                )
+            
             return TaskStatusDTO(
                 task_id=task_id,
                 execution_status=execution_status,
-                literature_status=literature_status,
+                literature_status=literature_status_obj,
                 literature_id=literature_id,
-                result_type=TaskResultType.LITERATURE_CREATED if literature_id else TaskResultType.TASK_ERROR,
-                progress=100 if execution_status == TaskExecutionStatus.COMPLETED else 50 if execution_status == TaskExecutionStatus.RUNNING else 0,
-                error_message=error_message,
-                created_at=None,  # Celery doesn't provide this easily
-                updated_at=None,  # Celery doesn't provide this easily
+                result_type=result_type,
+                status=execution_status.value,
+                overall_progress=overall_progress,
+                current_stage=current_stage,
+                error_info=error_info
             )
 
         except Exception as e:
-            logger.error(f"Error getting task status for {task_id}: {e}")
-            # 即使出错也返回TaskStatusDTO而不是None
+            logger.error(f"Error getting task status for {task_id}: {e}", exc_info=True)
+            error_info = TaskErrorInfo(
+                error_type="TaskStatusQueryError",
+                error_message=f"Failed to get task status: {str(e)}"
+            )
+            
             return TaskStatusDTO(
                 task_id=task_id,
                 execution_status=TaskExecutionStatus.FAILED,
-                literature_status=LiteratureProcessingStatus.FAILED,
+                literature_status=None,
                 literature_id=None,
-                result_type=TaskResultType.TASK_ERROR,
-                progress=0,
-                error_message=f"Failed to get task status: {str(e)}",
-                created_at=None,
-                updated_at=None,
+                result_type=None,
+                status=TaskExecutionStatus.FAILED.value,
+                overall_progress=0,
+                error_info=error_info,
+                current_stage="查询任务状态时出错"
             )
 
 

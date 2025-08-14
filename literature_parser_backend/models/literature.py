@@ -209,6 +209,27 @@ class TaskInfoModel(BaseModel):
         description="Error message if task failed",
     )
 
+    def get_overall_progress(self) -> int:
+        """Calculate overall progress based on component statuses."""
+        return self.component_status.get_overall_progress()
+
+    def get_current_stage_display(self) -> str:
+        """Get a human-readable description of the current processing stage."""
+        if self.status == "completed":
+            return "处理完成"
+        if self.status == "failed":
+            return f"处理失败: {self.error_message or '未知错误'}"
+
+        # Check components in order of execution
+        if self.component_status.references.status.value == "processing":
+            return self.component_status.references.stage
+        if self.component_status.content.status.value == "processing":
+            return self.component_status.content.stage
+        if self.component_status.metadata.status.value == "processing":
+            return self.component_status.metadata.stage
+
+        return "任务正在队列中等待"
+
 
 # ===============================
 # Main MongoDB Document Model
