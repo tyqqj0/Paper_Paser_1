@@ -129,7 +129,8 @@ def extract_authoritative_identifiers(
                         }
                     }
                     logger.warning(f"URL验证失败: {source['url']}")
-                    raise ValueError(f"URL验证失败: {url_validation_info['error']}")
+                    # raise ValueError(f"URL验证失败: {url_validation_info['error']}")
+                    return identifiers, "unknown", url_validation_info
                 else:
                     url_validation_info = {
                         "status": "success",
@@ -179,7 +180,8 @@ def extract_authoritative_identifiers(
         except Exception as e:
             # 如果是URL验证失败，直接抛出
             if "URL验证失败" in str(e):
-                raise e
+                # This error is now handled by returning the validation info dict
+                pass
 
             # 其他异常，回退到传统方法
             logger.warning(f"URL映射服务失败，回退到传统方法: {e}")

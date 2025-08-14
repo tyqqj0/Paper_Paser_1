@@ -459,6 +459,7 @@ class LiteratureDAO(BaseNeo4jDAO):
             
             temp_refs = parse_json_field(node.get("temp_references"))
             if temp_refs and isinstance(temp_refs, list):
+                references = []
                 for ref in temp_refs:
                     try:
                         # Handle both string (JSON) and dict formats

@@ -51,6 +51,7 @@ class ProcessorResult:
     error: Optional[str] = None
     confidence: float = 0.0  # 0.0 to 1.0
     source: str = ""
+    new_identifiers: Optional[Dict[str, str]] = None  # 承载新发现的标识符
     
     @property
     def is_valid(self) -> bool:

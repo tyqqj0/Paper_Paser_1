@@ -14,7 +14,10 @@
       "Bash(sudo docker-compose:*)",
       "Bash(groups $USER)",
       "Bash(curl:*)",
-      "Bash(sudo docker compose:*)"
+      "Bash(sudo docker compose:*)",
+      "Bash(poetry add:*)",
+      "Bash(docker logs:*)",
+      "Bash(sudo docker logs:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"

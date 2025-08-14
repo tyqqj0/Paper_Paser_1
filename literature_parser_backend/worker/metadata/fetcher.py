@@ -6,6 +6,7 @@ for clean separation of concerns and easy extensibility.
 """
 
 import logging
+import asyncio
 from typing import Any, Dict, List, Optional, Tuple
 
 from ...models.literature import MetadataModel
@@ -64,6 +65,16 @@ class MetadataFetcher:
             identifiers, source_data, pdf_content
         )
         
+        # --- 终极调试日志 ---
+        logger.info(f"🕵️‍♂️ [METADATA DEBUG] Preprocessed IdentifierData for processor selection:")
+        logger.info(f"  - DOI: {identifier_data.doi}")
+        logger.info(f"  - ArXiv ID: {identifier_data.arxiv_id}")
+        logger.info(f"  - URL: {identifier_data.url}")
+        logger.info(f"  - PDF URL: {identifier_data.pdf_url}")
+        logger.info(f"  - Title: {identifier_data.title}")
+        logger.info(f"  - Has PDF Content: {bool(identifier_data.pdf_content)}")
+        # --- 结束调试日志 ---
+        
         logger.info(f"Preprocessed identifiers: DOI={bool(identifier_data.doi)}, "
                    f"ArXiv={bool(identifier_data.arxiv_id)}, URL={bool(identifier_data.url)}, "
                    f"Title={bool(identifier_data.title)}")
@@ -73,6 +84,11 @@ class MetadataFetcher:
             identifier_data, settings=self.settings
         )
         
+        # --- 终极调试日志 ---
+        processor_names = [p.name for p in available_processors]
+        logger.info(f"🕵️‍♂️ [METADATA DEBUG] Available processors selected: {processor_names}")
+        # --- 结束调试日志 ---
+
         if not available_processors:
             logger.warning("No processors available for these identifiers")
             return None, {"error": "No suitable processors found"}
@@ -88,7 +104,15 @@ class MetadataFetcher:
             try:
                 logger.info(f"🔍 Trying processor: {processor.name} (priority: {processor.priority})")
                 
-                result = await processor.process(identifier_data)
+                # Run synchronous processors in a thread pool to avoid blocking the event loop
+                if not asyncio.iscoroutinefunction(processor.process):
+                    loop = asyncio.get_running_loop()
+                    result = await loop.run_in_executor(
+                        None, processor.process, identifier_data
+                    )
+                else:
+                    result = await processor.process(identifier_data)
+                
                 attempted_sources.append(processor.name)
                 
                 if result.is_valid:

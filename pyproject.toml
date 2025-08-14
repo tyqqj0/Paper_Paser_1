@@ -35,6 +35,8 @@ aiohttp = "^3.10.11"
 cos-python-sdk-v5 = "^1.9.30"
 neo4j = "^5.15.0"
 elasticsearch = "^8.11.0"
+requests = "^2.32.4"
+beautifulsoup4 = "^4.13.4"
 
 
 [tool.poetry.group.dev.dependencies]

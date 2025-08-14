@@ -578,6 +578,7 @@ async def _check_and_handle_post_metadata_duplicate(
     If a duplicate is found, it merges aliases, deletes the placeholder,
     and returns the LID of the existing literature.
     """
+    logger.info(f"🕵️‍♂️ [Secondary Dedup] Starting for placeholder {placeholder_lid} with title='{metadata.title}' and DOI='{identifiers.doi}'")
     existing_lit = None
     # 1. Check by DOI first (most reliable)
     if identifiers and identifiers.doi:
@@ -587,79 +588,39 @@ async def _check_and_handle_post_metadata_duplicate(
     if not existing_lit and metadata and metadata.title:
         # Use fuzzy search to get candidates, then a more precise similarity check
         candidates = await dao.find_by_title_fuzzy(metadata.title, limit=5)
+        logger.info(f"🕵️‍♂️ [Secondary Dedup] Found {len(candidates)} candidates by fuzzy title search for '{metadata.title}'")
         for cand_lit in candidates:
-            if cand_lit.metadata and cand_lit.metadata.title:
-                # Use a standard, balanced matching mode
-                if TitleMatchingUtils.is_acceptable_match(
-                    cand_lit.metadata.title, metadata.title, mode=MatchingMode.STANDARD
-                ):
-                    # As an extra precaution, check year difference for non-DOI matches
-                    if metadata.year and cand_lit.metadata.year:
-                        try:
-                            year_diff = abs(int(metadata.year) - int(cand_lit.metadata.year))
-                            if year_diff > 2:  # Allow up to 2 years difference
-                                continue  # Likely a different version, not a duplicate
-                        except (ValueError, TypeError):
-                            pass  # Ignore if year is not a valid integer
-                    existing_lit = cand_lit
-                    break  # Found a match
+            if not cand_lit or not cand_lit.metadata or not cand_lit.metadata.title:
+                logger.warning(f"🕵️‍♂️ [Secondary Dedup] Skipping invalid candidate: {cand_lit}")
+                continue
+            
+            logger.info(f"🕵️‍♂️ [Secondary Dedup]  - Comparing with candidate {cand_lit.lid} ('{cand_lit.metadata.title}')")
+            # Use a standard, balanced matching mode
+            is_match = TitleMatchingUtils.is_acceptable_match(
+                cand_lit.metadata.title, metadata.title, mode=MatchingMode.STANDARD
+            )
+            logger.info(f"🕵️‍♂️ [Secondary Dedup]  - Title match result: {is_match}")
+            
+            if is_match:
+                # As an extra precaution, check year difference for non-DOI matches
+                if metadata.year and cand_lit.metadata.year:
+                    try:
+                        year_diff = abs(int(metadata.year) - int(cand_lit.metadata.year))
+                        logger.info(f"🕵️‍♂️ [Secondary Dedup]  - Year difference: {year_diff}")
+                        if year_diff > 2:  # Allow up to 2 years difference
+                            logger.info(f"🕵️‍♂️ [Secondary Dedup]  - Year difference too large, skipping.")
+                            continue  # Likely a different version, not a duplicate
+                    except (ValueError, TypeError):
+                        pass  # Ignore if year is not a valid integer
+                
+                logger.info(f"✅ [Secondary Dedup] Match found: {cand_lit.lid}")
+                existing_lit = cand_lit
+                break  # Found a match
+    
+    if not existing_lit:
+        logger.info("🕵️‍♂️ [Secondary Dedup] No duplicate found after all checks.")
 
     # 3. If a duplicate is found, handle it
-    if not existing_lit and metadata and metadata.title:
-        logger.info(f"Task {task_id}: Starting secondary deduplication for title: '{metadata.title}'")
-        
-        # 2a. Check for exact match after normalization
-        # This is the most reliable way to find duplicates
-        candidates = await dao.find_by_title_fuzzy(metadata.title, limit=10)
-        logger.info(f"Task {task_id}: Found {len(candidates)} potential candidates for title match.")
-
-        for i, cand_lit in enumerate(candidates):
-            if cand_lit.metadata and cand_lit.metadata.title:
-                norm_new = TitleMatchingUtils.normalize_title(metadata.title)
-                norm_cand = TitleMatchingUtils.normalize_title(cand_lit.metadata.title)
-                exact_match_result = TitleMatchingUtils.is_exact_match(cand_lit.metadata.title, metadata.title)
-
-                logger.info(f"Task {task_id}: Candidate {i+1}/{len(candidates)} LID: {cand_lit.lid}")
-                logger.info(f"  - New Title (raw): '{metadata.title}'")
-                logger.info(f"  - Cand. Title (raw): '{cand_lit.metadata.title}'")
-                logger.info(f"  - New Title (norm): '{norm_new}'")
-                logger.info(f"  - Cand. Title (norm): '{norm_cand}'")
-                logger.info(f"  - Exact Match? -> {exact_match_result}")
-
-                if exact_match_result:
-                    existing_lit = cand_lit
-                    logger.info(f"Task {task_id}: Found duplicate by exact title match: {existing_lit.lid}")
-                    break  # Found exact match
-
-    # 2b. If no exact match, fall back to similarity-based matching
-    if not existing_lit and metadata and metadata.title:
-        logger.info(f"Task {task_id}: No exact match found, proceeding to similarity-based matching.")
-        if 'candidates' not in locals(): # Reuse candidates if already fetched
-             candidates = await dao.find_by_title_fuzzy(metadata.title, limit=5)
-        
-        for i, cand_lit in enumerate(candidates):
-            if cand_lit.metadata and cand_lit.metadata.title:
-                similarity = TitleMatchingUtils.calculate_similarity_by_mode(cand_lit.metadata.title, metadata.title, mode=MatchingMode.STANDARD)
-                is_match = similarity >= 0.8 # Using default threshold for STANDARD mode
-
-                logger.info(f"Task {task_id}: Similarity Candidate {i+1}/{len(candidates)} LID: {cand_lit.lid}")
-                logger.info(f"  - Similarity Score: {similarity:.4f} (Mode: STANDARD, Threshold: 0.8)")
-                logger.info(f"  - Acceptable Match? -> {is_match}")
-
-                if is_match:
-                    # As an extra precaution, check year difference for non-DOI matches
-                    if metadata.year and cand_lit.metadata.year:
-                        try:
-                            year_diff = abs(int(metadata.year) - int(cand_lit.metadata.year))
-                            if year_diff > 2:  # Allow up to 2 years difference
-                                logger.info(f"  - Year diff {year_diff} > 2, rejecting match.")
-                                continue  # Likely a different version, not a duplicate
-                        except (ValueError, TypeError):
-                            pass  # Ignore if year is not a valid integer
-                    existing_lit = cand_lit
-                    logger.info(f"Task {task_id}: Found duplicate by similarity match: {existing_lit.lid}")
-                    break  # Found a match
-
     if existing_lit and existing_lit.lid:
         logger.info(
             f"Task {task_id}: Post-metadata duplicate found! "
@@ -709,67 +670,39 @@ async def _process_literature_async(
 
         dao = LiteratureDAO.create_from_task_connection(database)
 
-        # 1. Enhanced Waterfall Deduplication
+        # 1. Enhanced Waterfall Deduplication (now includes identifier extraction)
         logger.info(f"Task {task_id}: About to start deduplication with source: {source}")
         deduplicator = WaterfallDeduplicator(dao, task_id)
-        existing_id, prefetched_meta, pdf_content = (
+        existing_id, identifiers, url_validation_info = (
             await deduplicator.deduplicate_literature(source)
         )
         logger.info(f"Task {task_id}: Deduplication completed. Existing ID: {existing_id}")
 
-        # Extract identifiers for downstream processing
-        logger.info(f"Task {task_id}: 🔍 [DEBUG] About to extract identifiers from source")
-        logger.info(f"Task {task_id}: 🔍 [DEBUG] Source keys: {list(source.keys())}")
-        logger.info(f"Task {task_id}: 🔍 [DEBUG] Source data: {source}")
-        
-        try:
-            identifiers, primary_type, url_validation_info = extract_authoritative_identifiers(source)
-            
-            logger.info(f"Task {task_id}: ✅ Identifier extraction completed")
-            logger.info(f"Task {task_id}: 🔍 [DEBUG] Extracted DOI: {identifiers.doi}")
-            logger.info(f"Task {task_id}: 🔍 [DEBUG] Extracted ArXiv ID: {identifiers.arxiv_id}")
-            logger.info(f"Task {task_id}: 🔍 [DEBUG] Primary type: {primary_type}")
+        # 如果有URL验证信息，存储到任务状态中并添加到source_data
+        if url_validation_info:
+            task_manager.set_url_validation_info(url_validation_info)
+            # 🆕 将URL映射结果添加到source中，供元数据获取器使用
+            source.update(url_validation_info)
 
-            # 如果有URL验证信息，存储到任务状态中并添加到source_data
-            if url_validation_info:
-                task_manager.set_url_validation_info(url_validation_info)
-                # 🆕 将URL映射结果添加到source中，供元数据获取器使用
-                source.update(url_validation_info)
-
-        except ValueError as e:
-            # URL验证失败，创建错误信息并终止任务
-            if "URL验证失败" in str(e):
-                logger.error(f"任务 {task_id} URL验证失败: {e}")
-
-                # 创建URL验证失败的错误信息
-                from ..models.task import TaskErrorInfo
-                from datetime import datetime
-                error_info = TaskErrorInfo(
-                    error_type="URLValidationError",
-                    error_message=str(e),
-                    error_category="url_validation",
-                    url_validation_details={
-                        "original_url": source.get("url"),
-                        "error_type": "url_not_accessible",
-                        "validation_time": str(datetime.now()),
-                    }
-                )
-
-                # 更新任务状态为失败
-                task_manager.fail_task_with_url_validation_error(error_info, source.get("url"))
-
-                # 直接返回URL验证失败的结果，不抛出异常（避免Celery序列化问题）
-                return {
-                    "status": TaskExecutionStatus.FAILED,
-                    "error_message": str(e),
-                    "error_category": "url_validation",
-                    "url_validation_status": "failed",
-                    "url_validation_error": str(e),
-                    "original_url": source.get("url"),
-                }
-            else:
-                # 其他类型的错误，继续原有处理逻辑
-                raise e
+        # Handle URL validation failures that might be caught during deduplication
+        if url_validation_info and url_validation_info.get("status") == "failed":
+            from ..models.task import TaskErrorInfo
+            from datetime import datetime
+            error_info = TaskErrorInfo(
+                error_type="URLValidationError",
+                error_message=url_validation_info.get("error", "URL validation failed"),
+                error_category="url_validation",
+                url_validation_details=url_validation_info.get("validation_details", {})
+            )
+            task_manager.fail_task_with_url_validation_error(error_info, source.get("url"))
+            return {
+                "status": TaskExecutionStatus.FAILED,
+                "error_message": error_info.error_message,
+                "error_category": "url_validation",
+                "url_validation_status": "failed",
+                "url_validation_error": error_info.error_message,
+                "original_url": source.get("url"),
+            }
 
         if existing_id:
             task_manager.update_task_progress("文献已存在，检查新别名", 90, existing_id)
@@ -856,8 +789,8 @@ async def _process_literature_async(
         metadata_result = await metadata_fetcher.fetch_metadata_waterfall(
             identifiers=identifiers.model_dump(),
             source_data=source,
-            pre_fetched_metadata=prefetched_meta,
-            pdf_content=pdf_content,  # Pass PDF content for GROBID fallback
+            pre_fetched_metadata=None,  # This is now handled by the new deduplicator
+            pdf_content=None,  # This is now handled by the new deduplicator
         )
 
         # Handle result tuple safely
@@ -1002,7 +935,7 @@ async def _process_literature_async(
             references_fetcher = ReferencesFetcher()
             references_result = references_fetcher.fetch_references_waterfall(
                 identifiers=identifiers.model_dump(),
-                pdf_content=pdf_content,
+                pdf_content=None, # PDF content is handled later
             )
 
             # Handle result tuple safely

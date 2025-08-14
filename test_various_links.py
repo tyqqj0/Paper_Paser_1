@@ -182,15 +182,19 @@ class ComprehensiveTester:
                         status = task_status.get("status", "").lower()
                         
                         if status == "completed":
-                            # 任务完成，获取结果
-                            result.success = True
+                            result_type = task_status.get("result_type")
                             result.literature_id = task_status.get("literature_id")
                             result.raw_response = task_status
-                            
+                            result.success = True  # Mark as success regardless of type
+
+                            if result_type == "duplicate":
+                                print(f"   ✅ 成功 (副本): LID={result.literature_id}")
+                            else:
+                                print(f"   ✅ 成功 (创建): LID={result.literature_id}")
+
                             if result.literature_id:
                                 result = await self._get_literature_details(result)
                             
-                            print(f"   ✅ 成功: LID={result.literature_id}")
                             return result
                             
                         elif status == "failed":
@@ -429,7 +433,9 @@ class ComprehensiveTester:
         print(f"\n📋 详细结果:")
         for result in report["detailed_results"]:
             status = "✅" if result["success"] else "❌"
-            print(f"   {status} {result['test_name']}")
+            is_duplicate = result.get("raw_response", {}).get("result_type") == "duplicate"
+            duplicate_marker = " (副本)" if is_duplicate else ""
+            print(f"   {status} {result['test_name']}{duplicate_marker}")
             if result["success"]:
                 print(f"      处理器: {result['processor_used']}")
                 print(f"      质量: {result['metadata_quality']}/100")
