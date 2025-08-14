@@ -154,6 +154,24 @@ def extract_authoritative_identifiers(
                 primary_type = "arxiv"
                 logger.info(f"✅ URL映射提取到ArXiv ID: {identifiers.arxiv_id}")
 
+            # 🆕 保存URL映射结果供元数据获取器使用（包括标题等信息）
+            if mapping_result.is_successful():
+                # 将URL映射结果添加到url_validation_info中，供后续使用
+                if not url_validation_info:
+                    url_validation_info = {}
+                
+                url_validation_info["url_mapping_result"] = {
+                    "title": mapping_result.title,
+                    "year": mapping_result.year,
+                    "venue": mapping_result.venue,
+                    "source_page_url": mapping_result.source_page_url,
+                    "pdf_url": mapping_result.pdf_url,
+                    "source_adapter": mapping_result.source_adapter,
+                    "strategy_used": mapping_result.strategy_used,
+                    "confidence": mapping_result.confidence
+                }
+                logger.info(f"✅ URL映射提取到有用信息: title={bool(mapping_result.title)}, venue={mapping_result.venue}")
+
             # 如果URL映射服务找到了标识符，直接返回
             if identifiers.doi or identifiers.arxiv_id:
                 return identifiers, primary_type or "unknown", url_validation_info
