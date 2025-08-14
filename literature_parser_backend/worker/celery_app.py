@@ -13,6 +13,9 @@ from ..settings import Settings
 
 logger = logging.getLogger(__name__)
 
+# Import signals module to register signal handlers
+from . import signals
+
 # Load settings
 settings = Settings()
 

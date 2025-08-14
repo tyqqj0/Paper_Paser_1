@@ -62,26 +62,54 @@ class SimpleStatusManager:
                     if result.successful():
                         task_result = result.get()
                         if isinstance(task_result, dict):
-                            literature_id = task_result.get("lid") or task_result.get("literature_id")
+                            literature_id = task_result.get("literature_id")  # 统一使用 "literature_id"
+                            if not literature_id:
+                                literature_id = task_result.get("lid") # 兼容旧版
+
                             result_type_str = task_result.get("result_type")
-                            result_type = TaskResultType(result_type_str) if result_type_str else None
+                            # 确保 result_type_str 是字符串类型
+                            if isinstance(result_type_str, TaskResultType):
+                                result_type = result_type_str
+                            elif isinstance(result_type_str, str):
+                                result_type = TaskResultType(result_type_str)
+                            else:
+                                result_type = None
+                                
                             execution_status = TaskExecutionStatus.COMPLETED
                             overall_progress = 100
                             current_stage = "处理完成"
+                            
+                            # 当任务为DUPLICATE时，阶段显示更具体信息
+                            if result_type == TaskResultType.DUPLICATE:
+                                current_stage = "文献已存在（重复）"
+                            
                         else:
+                            # 正常情况下，Celery成功时，结果应该是dict
+                            # 如果不是，则标记为失败，并记录错误信息
                             execution_status = TaskExecutionStatus.FAILED
-                            error_message = "Task completed but returned unexpected result type"
-                    else:
+                            error_message = f"任务成功，但返回了意外的结果类型: {type(task_result).__name__}"
+                            
+                    else:  # result.failed()
                         execution_status = TaskExecutionStatus.FAILED
-                        error_message = str(result.result) if result.result else "Unknown error"
-                else: # 任务未就绪
+                        # 尝试从result.result中提取更详细的错误信息
+                        error_info_dict = result.result if isinstance(result.result, dict) else {}
+                        error_message = error_info_dict.get('error', str(result.result) or "未知错误")
+                
+                else:  # 任务未就绪
                     execution_status = TaskExecutionStatus.PROCESSING
-                    current_stage = "任务正在处理中"
-                    overall_progress = 50 # 默认处理中为50%
+                    # 尝试从meta中获取更详细的进度信息
+                    task_meta = result.info if isinstance(result.info, dict) else {}
+                    current_stage = task_meta.get("current_stage", "任务正在处理中")
+                    overall_progress = task_meta.get("progress", 50) # 默认处理中为50%
 
             # 如果有文献ID，从数据库获取详细状态
-            if literature_id:
-                literature = await self.dao.find_by_lid(literature_id)
+            # 只有在任务完成，或者处理过程中获得了literature_id时才执行
+            current_lit_id_for_db = literature_id
+            if not current_lit_id_for_db and isinstance(result.info, dict):
+                current_lit_id_for_db = result.info.get("literature_id")
+
+            if current_lit_id_for_db:
+                literature = await self.dao.find_by_lid(current_lit_id_for_db)
                 if literature and literature.task_info:
                     task_info = literature.task_info
                     # 使用TaskInfoModel创建LiteratureProcessingStatus
@@ -93,23 +121,36 @@ class SimpleStatusManager:
                         created_at=literature.created_at,
                         updated_at=literature.updated_at
                     )
-                    overall_progress = literature_status_obj.overall_progress
+                    
+                    # 仅当任务未完成时，才用数据库的进度覆盖
+                    if not result.ready():
+                        overall_progress = literature_status_obj.overall_progress
                     
                     # --- Start of inlined get_current_stage_display logic ---
-                    if task_info.status == "completed":
-                        current_stage = "处理完成"
-                    elif task_info.status == "failed":
-                        current_stage = f"处理失败: {task_info.error_message or '未知错误'}"
-                    elif task_info.component_status.references.status.value == "processing":
-                        current_stage = task_info.component_status.references.stage
-                    elif task_info.component_status.content.status.value == "processing":
-                        current_stage = task_info.component_status.content.stage
-                    elif task_info.component_status.metadata.status.value == "processing":
-                        current_stage = task_info.component_status.metadata.stage
-                    else:
-                        current_stage = "任务正在队列中等待"
+                    # 仅当任务未完成时，才用数据库的阶段信息覆盖
+                    if not result.ready():
+                        if task_info.status == "completed":
+                            current_stage = "处理完成"
+                        elif task_info.status == "failed":
+                            current_stage = f"处理失败: {task_info.error_message or '未知错误'}"
+                        elif task_info.component_status.references.status.value == "processing":
+                            current_stage = task_info.component_status.references.stage
+                        elif task_info.component_status.content.status.value == "processing":
+                            current_stage = task_info.component_status.content.stage
+                        elif task_info.component_status.metadata.status.value == "processing":
+                            current_stage = task_info.component_status.metadata.stage
+                        else:
+                            current_stage = "任务正在队列中等待"
                     # --- End of inlined get_current_stage_display logic ---
-
+            
+            # 仅在任务未就绪时，从Celery meta获取更详细的URL验证状态
+            if not result.ready() and isinstance(result.info, dict):
+                url_validation_status = result.info.get("url_validation_status")
+                if url_validation_status == "failed":
+                    execution_status = TaskExecutionStatus.FAILED
+                    error_message = result.info.get("url_validation_error", "URL验证失败")
+                    current_stage = f"验证失败: {error_message}"
+            
             error_info = None
             if error_message:
                 error_info = TaskErrorInfo(

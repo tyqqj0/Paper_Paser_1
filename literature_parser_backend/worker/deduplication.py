@@ -15,6 +15,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from loguru import logger
 
 from ..db.dao import LiteratureDAO
+from ..db.alias_dao import AliasDAO
+from ..models.alias import AliasType
 from ..models.literature import LiteratureModel, MetadataModel
 from ..services.grobid import GrobidClient
 from ..worker.content_fetcher import ContentFetcher
@@ -28,6 +30,8 @@ class WaterfallDeduplicator:
         self.task_id = task_id
         self.grobid_client = GrobidClient()
         self.content_fetcher = ContentFetcher()
+        # 0.2.1 Hotfix: Initialize AliasDAO for URL deduplication
+        self.alias_dao = AliasDAO.create_from_global_connection()
 
     async def deduplicate_literature(
         self,
@@ -149,19 +153,14 @@ class WaterfallDeduplicator:
         for url in urls:
             logger.info(f"Task {self.task_id}: Checking source URL: {url}")
 
-            # Query database for matching source URLs
-            query = {
-                "$or": [
-                    {"identifiers.source_urls": url},
-                    {"content.pdf_url": url},
-                    {"content.source_page_url": url},
-                ],
-            }
-
+            # Query database for matching source URLs - 0.2.1 Hotfix
             try:
-                doc = await self.dao.collection.find_one(query)
-                if doc:
-                    literature = LiteratureModel(**doc)
+                # Use the new AliasDAO for checking source URLs
+                existing_lid = await self.alias_dao._lookup_single_alias(AliasType.SOURCE_PAGE, url)
+                if existing_lid:
+                    literature = await self.dao.find_by_lid(existing_lid)
+                    if not literature: # Should not happen, but handle defensively
+                        continue
 
                     # Clean up failed literature
                     if literature.task_info and literature.task_info.status == "failed":
@@ -174,7 +173,7 @@ class WaterfallDeduplicator:
                     return literature.lid
             except Exception as e:
                 logger.error(
-                    f"Task {self.task_id}: Error checking source URL {url}: {e}",
+                    f"Task {self.task_id}: Error checking source URL {url} via AliasDAO: {e}",
                 )
 
         return None

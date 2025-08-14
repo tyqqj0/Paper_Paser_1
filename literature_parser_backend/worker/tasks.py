@@ -28,6 +28,7 @@ from ..services import GrobidClient
 from ..services.lid_generator import LIDGenerator
 from ..db.alias_dao import AliasDAO
 from ..models.alias import AliasType, extract_aliases_from_source
+from ..utils.title_matching import MatchingMode, TitleMatchingUtils
 from .celery_app import celery_app
 from .content_fetcher import ContentFetcher
 from .deduplication import WaterfallDeduplicator
@@ -564,6 +565,134 @@ async def _upgrade_matching_unresolved_nodes(
         pass
 
 
+async def _check_and_handle_post_metadata_duplicate(
+    dao: "LiteratureDAO",
+    identifiers: "IdentifiersModel",
+    metadata: "MetadataModel",
+    source_data: Dict[str, Any],
+    placeholder_lid: str,
+    task_id: str,
+) -> Optional[str]:
+    """
+    Checks for duplicates after metadata is fetched and handles them.
+    If a duplicate is found, it merges aliases, deletes the placeholder,
+    and returns the LID of the existing literature.
+    """
+    existing_lit = None
+    # 1. Check by DOI first (most reliable)
+    if identifiers and identifiers.doi:
+        existing_lit = await dao.find_by_doi(identifiers.doi)
+
+    # 2. If no DOI match, check by title similarity
+    if not existing_lit and metadata and metadata.title:
+        # Use fuzzy search to get candidates, then a more precise similarity check
+        candidates = await dao.find_by_title_fuzzy(metadata.title, limit=5)
+        for cand_lit in candidates:
+            if cand_lit.metadata and cand_lit.metadata.title:
+                # Use a standard, balanced matching mode
+                if TitleMatchingUtils.is_acceptable_match(
+                    cand_lit.metadata.title, metadata.title, mode=MatchingMode.STANDARD
+                ):
+                    # As an extra precaution, check year difference for non-DOI matches
+                    if metadata.year and cand_lit.metadata.year:
+                        try:
+                            year_diff = abs(int(metadata.year) - int(cand_lit.metadata.year))
+                            if year_diff > 2:  # Allow up to 2 years difference
+                                continue  # Likely a different version, not a duplicate
+                        except (ValueError, TypeError):
+                            pass  # Ignore if year is not a valid integer
+                    existing_lit = cand_lit
+                    break  # Found a match
+
+    # 3. If a duplicate is found, handle it
+    if not existing_lit and metadata and metadata.title:
+        logger.info(f"Task {task_id}: Starting secondary deduplication for title: '{metadata.title}'")
+        
+        # 2a. Check for exact match after normalization
+        # This is the most reliable way to find duplicates
+        candidates = await dao.find_by_title_fuzzy(metadata.title, limit=10)
+        logger.info(f"Task {task_id}: Found {len(candidates)} potential candidates for title match.")
+
+        for i, cand_lit in enumerate(candidates):
+            if cand_lit.metadata and cand_lit.metadata.title:
+                norm_new = TitleMatchingUtils.normalize_title(metadata.title)
+                norm_cand = TitleMatchingUtils.normalize_title(cand_lit.metadata.title)
+                exact_match_result = TitleMatchingUtils.is_exact_match(cand_lit.metadata.title, metadata.title)
+
+                logger.info(f"Task {task_id}: Candidate {i+1}/{len(candidates)} LID: {cand_lit.lid}")
+                logger.info(f"  - New Title (raw): '{metadata.title}'")
+                logger.info(f"  - Cand. Title (raw): '{cand_lit.metadata.title}'")
+                logger.info(f"  - New Title (norm): '{norm_new}'")
+                logger.info(f"  - Cand. Title (norm): '{norm_cand}'")
+                logger.info(f"  - Exact Match? -> {exact_match_result}")
+
+                if exact_match_result:
+                    existing_lit = cand_lit
+                    logger.info(f"Task {task_id}: Found duplicate by exact title match: {existing_lit.lid}")
+                    break  # Found exact match
+
+    # 2b. If no exact match, fall back to similarity-based matching
+    if not existing_lit and metadata and metadata.title:
+        logger.info(f"Task {task_id}: No exact match found, proceeding to similarity-based matching.")
+        if 'candidates' not in locals(): # Reuse candidates if already fetched
+             candidates = await dao.find_by_title_fuzzy(metadata.title, limit=5)
+        
+        for i, cand_lit in enumerate(candidates):
+            if cand_lit.metadata and cand_lit.metadata.title:
+                similarity = TitleMatchingUtils.calculate_similarity_by_mode(cand_lit.metadata.title, metadata.title, mode=MatchingMode.STANDARD)
+                is_match = similarity >= 0.8 # Using default threshold for STANDARD mode
+
+                logger.info(f"Task {task_id}: Similarity Candidate {i+1}/{len(candidates)} LID: {cand_lit.lid}")
+                logger.info(f"  - Similarity Score: {similarity:.4f} (Mode: STANDARD, Threshold: 0.8)")
+                logger.info(f"  - Acceptable Match? -> {is_match}")
+
+                if is_match:
+                    # As an extra precaution, check year difference for non-DOI matches
+                    if metadata.year and cand_lit.metadata.year:
+                        try:
+                            year_diff = abs(int(metadata.year) - int(cand_lit.metadata.year))
+                            if year_diff > 2:  # Allow up to 2 years difference
+                                logger.info(f"  - Year diff {year_diff} > 2, rejecting match.")
+                                continue  # Likely a different version, not a duplicate
+                        except (ValueError, TypeError):
+                            pass  # Ignore if year is not a valid integer
+                    existing_lit = cand_lit
+                    logger.info(f"Task {task_id}: Found duplicate by similarity match: {existing_lit.lid}")
+                    break  # Found a match
+
+    if existing_lit and existing_lit.lid:
+        logger.info(
+            f"Task {task_id}: Post-metadata duplicate found! "
+            f"Placeholder {placeholder_lid} matches existing {existing_lit.lid}."
+        )
+        
+        # Add new source info as alias to the existing literature
+        try:
+            alias_dao = AliasDAO(database=dao.driver)
+            source_aliases = extract_aliases_from_source(source_data)
+            if source_aliases:
+                await alias_dao.batch_create_mappings(
+                    lid=existing_lit.lid,
+                    mappings=source_aliases,
+                    confidence=1.0,
+                    metadata={"source": "post_metadata_deduplication", "task_id": task_id}
+                )
+                logger.info(f"Task {task_id}: Added new aliases {list(source_aliases.keys())} to existing literature {existing_lit.lid}")
+        except Exception as e:
+            logger.error(f"Task {task_id}: Failed to add alias to existing literature {existing_lit.lid}: {e}")
+
+        # Delete the placeholder node that is no longer needed
+        try:
+            await dao.delete_literature(placeholder_lid)
+            logger.info(f"Task {task_id}: Deleted placeholder literature {placeholder_lid}.")
+        except Exception as e:
+            logger.error(f"Task {task_id}: Failed to delete placeholder {placeholder_lid}: {e}")
+            
+        return existing_lit.lid
+
+    return None
+
+
 async def _process_literature_async(
     task_id: str,
     source: Dict[str, Any],
@@ -741,6 +870,20 @@ async def _process_literature_async(
 
         # 检查元数据获取是否成功并更新状态 - 使用严格的质量评估
         metadata_quality_check = _evaluate_metadata_quality(metadata, metadata_source)
+
+        # NEW: Secondary deduplication after getting metadata
+        if metadata and (metadata_quality_check["is_high_quality"] or metadata_quality_check["is_partial"]):
+            existing_lid_after_fetch = await _check_and_handle_post_metadata_duplicate(
+                dao=dao,
+                identifiers=identifiers,
+                metadata=metadata,
+                source_data=source,
+                placeholder_lid=literature_id,
+                task_id=task_id,
+            )
+            if existing_lid_after_fetch:
+                logger.info(f"Task {task_id}: Concluding task as DUPLICATE after secondary check.")
+                return task_manager.complete_task(TaskResultType.DUPLICATE, existing_lid_after_fetch)
         
         if metadata_quality_check["is_high_quality"]:
             overall_status = await dao.update_enhanced_component_status(
@@ -1020,243 +1163,6 @@ async def _process_literature_async(
         # Always close the task connection
         if client:
             await close_task_connection(client)
-
-
-# async def _check_version_merge_strategy(
-#     dao: "LiteratureDAO", 
-#     current_literature: "LiteratureModel", 
-#     unresolved_title: str, 
-#     task_id: str
-# ) -> tuple[bool, str]:
-#     """
-#     检查版本合并策略。
-    
-#     当发现匹配的未解析节点时，检查是否已存在相同标题的Literature，
-#     如果存在则决定合并策略。
-    
-#     Args:
-#         dao: Literature数据访问对象
-#         current_literature: 当前要添加的文献
-#         unresolved_title: 未解析节点的标题
-#         task_id: 任务ID
-        
-#     Returns:
-#         (should_upgrade: bool, merge_action: str)
-#         merge_action可以是: "normal", "add_as_alias", "upgrade_and_merge"
-#     """
-#     from ..utils.title_normalization import are_titles_equivalent
-    
-#     try:
-#         # 1. 检查是否已存在相同标题的Literature
-#         if not current_literature.metadata or not current_literature.metadata.title:
-#             return True, "normal"
-            
-#         current_title = current_literature.metadata.title
-#         current_year = current_literature.metadata.year or 9999  # 默认为最新
-        
-#         # 2. 查找标题相同的已存在文献
-#         async with dao._get_session() as session:
-#             # 查询所有Literature节点的标题和年份
-#             query = """
-#             MATCH (lit:Literature)
-#             WHERE lit.metadata IS NOT NULL
-#             RETURN lit.lid as lid, lit.metadata as metadata
-#             """
-            
-#             result = await session.run(query)
-#             existing_literatures = []
-#             async for record in result:
-#                 metadata_str = record["metadata"]
-#                 if metadata_str:
-#                     import json
-#                     metadata = json.loads(metadata_str)
-#                     if metadata.get("title"):
-#                         existing_literatures.append({
-#                             "lid": record["lid"],
-#                             "title": metadata["title"],
-#                             "year": metadata.get("year", 9999)
-#                         })
-        
-#         # 3. 查找标题匹配的文献
-#         matching_literature = None
-#         for lit in existing_literatures:
-#             if are_titles_equivalent(current_title, lit["title"]):
-#                 matching_literature = lit
-#                 break
-        
-#         if not matching_literature:
-#             # 没有找到匹配的现有文献，正常升级
-#             return True, "normal"
-        
-#         # 4. 发现同名文献，比较年份决定策略
-#         existing_year = matching_literature["year"]
-        
-#         logger.info(
-#             f"Task {task_id}: Found existing literature with same title. "
-#             f"Current: {current_year}, Existing: {existing_year}"
-#         )
-        
-#         if current_year < existing_year:
-#             # 当前文献更早，应该成为主版本
-#             logger.info(f"Task {task_id}: Current literature is older, will merge existing as alias")
-#             return True, "upgrade_and_merge"
-#         else:
-#             # 现有文献更早或相同，当前文献应该成为别名
-#             logger.info(f"Task {task_id}: Existing literature is older, current will be added as alias")
-#             return False, "add_as_alias"
-            
-#     except Exception as e:
-#         logger.error(f"Task {task_id}: Error in version merge check: {e}")
-#         # 出错时默认正常升级
-#         return True, "normal"
-
-
-# async def _add_literature_as_alias(
-#     dao: "LiteratureDAO", 
-#     literature: "LiteratureModel", 
-#     task_id: str
-# ):
-#     """
-#     将当前文献的标识符作为别名添加到已存在的主版本。
-    
-#     Args:
-#         dao: Literature数据访问对象  
-#         literature: 要添加为别名的文献
-#         task_id: 任务ID
-#     """
-#     try:
-#         from ..db.alias_dao import AliasDAO
-#         alias_dao = AliasDAO(database=dao.driver if hasattr(dao, 'driver') else None)
-        
-#         # 1. 找到主版本Literature的LID
-#         if not literature.metadata or not literature.metadata.title:
-#             logger.warning(f"Task {task_id}: Cannot add as alias - no title")
-#             return
-            
-#         from ..utils.title_normalization import normalize_title_for_matching
-#         normalized_title = normalize_title_for_matching(literature.metadata.title)
-        
-#         # 查找主版本
-#         async with dao._get_session() as session:
-#             query = """
-#             MATCH (lit:Literature)
-#             WHERE lit.metadata IS NOT NULL
-#             RETURN lit.lid as lid, lit.metadata as metadata
-#             ORDER BY lit.created_at ASC
-#             """
-            
-#             result = await session.run(query)
-#             main_literature_lid = None
-            
-#             async for record in result:
-#                 metadata_str = record["metadata"]
-#                 if metadata_str:
-#                     import json
-#                     metadata = json.loads(metadata_str)
-#                     if metadata.get("title"):
-#                         existing_normalized = normalize_title_for_matching(metadata["title"])
-#                         if existing_normalized == normalized_title:
-#                             main_literature_lid = record["lid"]
-#                             break
-        
-#         if not main_literature_lid:
-#             logger.error(f"Task {task_id}: Cannot find main literature for alias")
-#             return
-        
-#         # 2. 创建别名映射
-#         if literature.identifiers:
-#             identifiers = literature.identifiers.model_dump() if hasattr(literature.identifiers, 'model_dump') else literature.identifiers
-            
-#             for identifier_type, value in identifiers.items():
-#                 if value:
-#                     await alias_dao.create_alias(
-#                         alias_value=value,
-#                         alias_type=identifier_type,
-#                         literature_lid=main_literature_lid
-#                     )
-                    
-#         logger.info(f"Task {task_id}: ✅ Added literature identifiers as aliases to {main_literature_lid}")
-        
-#     except Exception as e:
-#         logger.error(f"Task {task_id}: Error adding literature as alias: {e}")
-
-
-# async def _merge_existing_versions_as_aliases(
-#     dao: "LiteratureDAO", 
-#     current_literature: "LiteratureModel", 
-#     task_id: str
-# ):
-#     """
-#     将已存在的旧版本文献合并为当前文献的别名。
-    
-#     Args:
-#         dao: Literature数据访问对象
-#         current_literature: 当前的主版本文献
-#         task_id: 任务ID
-#     """
-#     try:
-#         from ..utils.title_normalization import normalize_title_for_matching, are_titles_equivalent
-#         from ..db.alias_dao import AliasDAO
-        
-#         alias_dao = AliasDAO(database=dao.driver if hasattr(dao, 'driver') else None)
-        
-#         if not current_literature.metadata or not current_literature.metadata.title:
-#             return
-            
-#         current_title = current_literature.metadata.title
-        
-#         # 1. 查找标题相同但不同版本的Literature节点
-#         async with dao._get_session() as session:
-#             query = """
-#             MATCH (lit:Literature)
-#             WHERE lit.lid <> $current_lid AND lit.metadata IS NOT NULL
-#             RETURN lit.lid as lid, lit.metadata as metadata, lit.identifiers as identifiers
-#             """
-            
-#             result = await session.run(query, current_lid=current_literature.lid)
-#             to_merge = []
-            
-#             async for record in result:
-#                 metadata_str = record["metadata"]
-#                 if metadata_str:
-#                     import json
-#                     metadata = json.loads(metadata_str)
-#                     if metadata.get("title") and are_titles_equivalent(current_title, metadata["title"]):
-#                         to_merge.append({
-#                             "lid": record["lid"],
-#                             "identifiers": record["identifiers"]
-#                         })
-        
-#         # 2. 将找到的重复文献转为别名
-#         for old_lit in to_merge:
-#             # 提取旧文献的标识符
-#             if old_lit["identifiers"]:
-#                 identifiers_str = old_lit["identifiers"]
-#                 import json
-#                 identifiers = json.loads(identifiers_str) if isinstance(identifiers_str, str) else identifiers_str
-                
-#                 # 为每个标识符创建别名
-#                 for identifier_type, value in identifiers.items():
-#                     if value and identifier_type != "fingerprint":  # 跳过fingerprint
-#                         await alias_dao.create_alias(
-#                             alias_value=value,
-#                             alias_type=identifier_type, 
-#                             literature_lid=current_literature.lid
-#                         )
-            
-#             # 删除旧的Literature节点
-#             delete_query = "MATCH (lit:Literature {lid: $old_lid}) DETACH DELETE lit"
-#             await session.run(delete_query, old_lid=old_lit["lid"])
-            
-#             logger.info(f"Task {task_id}: ✅ Merged old version {old_lit['lid']} as aliases to {current_literature.lid}")
-            
-#     except Exception as e:
-#         logger.error(f"Task {task_id}: Error merging existing versions: {e}")
-
-
-# ===============================================
-# Celery Task Entry Point
-# ===============================================
 
 
 @celery_app.task(bind=True, name="process_literature_task")
