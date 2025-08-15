@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ....models.literature import AuthorModel, MetadataModel
 from ....services.arxiv_api import ArXivAPIClient
+from ....utils.title_matching import TitleMatchingUtils
 from ..base import IdentifierData, MetadataProcessor, ProcessorResult, ProcessorType
 
 logger = logging.getLogger(__name__)
@@ -48,24 +49,23 @@ class ArXivProcessor(MetadataProcessor):
         """
         检查是否可以处理给定的标识符。
         
-        只有在有ArXiv ID的情况下才能处理。
+        可以处理ArXiv ID或标题搜索。
         
         Args:
             identifiers: 标准化的标识符数据
             
         Returns:
-            True if 有ArXiv ID可以处理
+            True if 有ArXiv ID或标题可以处理
         """
-        return bool(identifiers.arxiv_id)
+        return bool(identifiers.arxiv_id) or bool(identifiers.title)
     
     async def process(self, identifiers: IdentifierData) -> ProcessorResult:
         """
         处理标识符并返回元数据。
         
-        ArXiv处理器的特殊逻辑：
-        1. 检查是否需要ArXiv增强（基于现有metadata质量）
-        2. 如果需要，获取ArXiv数据并增强
-        3. 如果没有现有metadata，直接使用ArXiv数据
+        ArXiv处理器支持两种模式：
+        1. ArXiv ID直接查询
+        2. 标题搜索（适用于NeurIPS等场景）
         
         Args:
             identifiers: 标准化的标识符数据
@@ -74,49 +74,17 @@ class ArXivProcessor(MetadataProcessor):
             ProcessorResult with 成功状态和元数据
         """
         try:
-            if not identifiers.arxiv_id:
-                return ProcessorResult(
-                    success=False,
-                    error="ArXiv: No ArXiv ID provided",
-                    source=self.name
-                )
-            
-            logger.info(f"🔍 ArXiv API查询: {identifiers.arxiv_id}")
-            
-            # 获取ArXiv数据
-            arxiv_data = self.arxiv_client.get_metadata(identifiers.arxiv_id)
-            
-            if not arxiv_data:
-                return ProcessorResult(
-                    success=False,
-                    error="ArXiv: No metadata found",
-                    source=self.name
-                )
-            
-            # 转换为标准MetadataModel
-            arxiv_metadata = self.arxiv_client.convert_to_metadata_model(arxiv_data)
-            
-            # 检查是否有现有metadata需要增强
-            existing_metadata = self._extract_existing_metadata(identifiers)
-            
-            if existing_metadata:
-                # 增强模式：合并现有metadata和ArXiv数据
-                enhanced_metadata = self._enhance_metadata(existing_metadata, arxiv_metadata)
-                confidence = 0.75  # 增强模式置信度稍低
-                logger.info("✅ ArXiv数据用于增强现有metadata")
+            # 优先使用ArXiv ID
+            if identifiers.arxiv_id:
+                return await self._process_by_arxiv_id(identifiers)
+            elif identifiers.title:
+                return await self._process_by_title(identifiers)
             else:
-                # 直接模式：使用ArXiv数据作为主要来源
-                enhanced_metadata = arxiv_metadata
-                confidence = 0.85  # 直接使用ArXiv数据置信度较高
-                logger.info("✅ ArXiv数据作为主要metadata来源")
-            
-            return ProcessorResult(
-                success=True,
-                metadata=enhanced_metadata,
-                raw_data=arxiv_data,
-                confidence=confidence,
-                source=self.name
-            )
+                return ProcessorResult(
+                    success=False,
+                    error="ArXiv: No ArXiv ID or title provided",
+                    source=self.name
+                )
             
         except Exception as e:
             logger.error(f"ArXiv处理器异常: {e}")
@@ -125,6 +93,91 @@ class ArXivProcessor(MetadataProcessor):
                 error=f"ArXiv处理器异常: {str(e)}",
                 source=self.name
             )
+    
+    async def _process_by_arxiv_id(self, identifiers: IdentifierData) -> ProcessorResult:
+        """通过ArXiv ID处理"""
+        logger.info(f"🔍 ArXiv API查询: {identifiers.arxiv_id}")
+        
+        # 获取ArXiv数据
+        arxiv_data = self.arxiv_client.get_metadata(identifiers.arxiv_id)
+        
+        if not arxiv_data:
+            return ProcessorResult(
+                success=False,
+                error="ArXiv: No metadata found",
+                source=self.name
+            )
+        
+        # 转换为标准MetadataModel
+        arxiv_metadata = self.arxiv_client.convert_to_metadata_model(arxiv_data)
+        
+        # 检查是否有现有metadata需要增强
+        existing_metadata = self._extract_existing_metadata(identifiers)
+        
+        if existing_metadata:
+            # 增强模式：合并现有metadata和ArXiv数据
+            enhanced_metadata = self._enhance_metadata(existing_metadata, arxiv_metadata)
+            confidence = 0.75  # 增强模式置信度稍低
+            logger.info("✅ ArXiv数据用于增强现有metadata")
+        else:
+            # 直接模式：使用ArXiv数据作为主要来源
+            enhanced_metadata = arxiv_metadata
+            confidence = 0.85  # 直接使用ArXiv数据置信度较高
+            logger.info("✅ ArXiv数据作为主要metadata来源")
+        
+        return ProcessorResult(
+            success=True,
+            metadata=enhanced_metadata,
+            raw_data=arxiv_data,
+            confidence=confidence,
+            source=self.name
+        )
+    
+    async def _process_by_title(self, identifiers: IdentifierData) -> ProcessorResult:
+        """通过标题搜索ArXiv"""
+        logger.info(f"🔍 ArXiv标题搜索: {identifiers.title}")
+        
+        # 搜索ArXiv
+        search_results = self.arxiv_client.search_by_title(identifiers.title, max_results=5)
+        
+        if not search_results:
+            return ProcessorResult(
+                success=False,
+                error="ArXiv: No search results found",
+                source=self.name
+            )
+        
+        logger.info(f"🔍 ArXiv返回{len(search_results)}个候选结果")
+        
+        # 使用智能匹配找到最佳结果
+        best_match, similarity_score = self._find_best_title_match(
+            target_title=identifiers.title,
+            target_year=identifiers.year,
+            candidates=search_results
+        )
+        
+        if not best_match or similarity_score < 0.7:  # 相对严格的阈值
+            return ProcessorResult(
+                success=False,
+                error="ArXiv: No results passed similarity filter",
+                source=self.name
+            )
+        
+        logger.info(f"✅ 选择最佳匹配: 相似度={similarity_score:.3f}")
+        
+        # 转换为标准元数据格式
+        arxiv_metadata = self.arxiv_client.convert_to_metadata_model(best_match)
+        
+        # 调整置信度（基于相似度）
+        confidence = min(0.8, similarity_score * 0.7)  # 搜索模式置信度稍低
+        
+        return ProcessorResult(
+            success=True,
+            metadata=arxiv_metadata,
+            raw_data=best_match,
+            confidence=confidence,
+            source=self.name
+        )
     
     def _extract_existing_metadata(self, identifiers: IdentifierData) -> Optional[MetadataModel]:
         """
@@ -273,6 +326,60 @@ class ArXivProcessor(MetadataProcessor):
             return True
         
         return False
+    
+    def _find_best_title_match(
+        self, 
+        target_title: str, 
+        target_year: Optional[int], 
+        candidates: List[Dict[str, Any]]
+    ) -> Tuple[Optional[Dict[str, Any]], float]:
+        """
+        从候选结果中找到最佳标题匹配
+        
+        Args:
+            target_title: 目标标题
+            target_year: 目标年份（可选）
+            candidates: 候选论文列表
+            
+        Returns:
+            (最佳匹配的论文, 相似度分数)
+        """
+        if not candidates:
+            return None, 0.0
+        
+        best_match = None
+        best_score = 0.0
+        
+        for candidate in candidates:
+            candidate_title = candidate.get('title', '')
+            candidate_year = candidate.get('year')
+            
+            if not candidate_title:
+                continue
+            
+            # 计算标题相似度
+            title_similarity = TitleMatchingUtils.calculate_similarity(
+                target_title, 
+                candidate_title
+            )
+            
+            # 年份匹配加分
+            year_bonus = 0.0
+            if target_year and candidate_year:
+                if target_year == candidate_year:
+                    year_bonus = 0.1  # 完全匹配
+                elif abs(target_year - candidate_year) <= 1:
+                    year_bonus = 0.05  # 相近年份
+            
+            total_score = title_similarity + year_bonus
+            
+            logger.debug(f"候选匹配: '{candidate_title}' - 相似度: {title_similarity:.3f}, 年份加分: {year_bonus:.3f}, 总分: {total_score:.3f}")
+            
+            if total_score > best_score:
+                best_score = total_score
+                best_match = candidate
+        
+        return best_match, best_score
 
 
 # 自动注册处理器

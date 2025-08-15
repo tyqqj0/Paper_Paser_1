@@ -45,7 +45,7 @@ class RouteManager:
             Route(
                 name="neurips_enhanced_path",
                 patterns=["proceedings.neurips.cc", "papers.nips.cc"],
-                processors=["Site Parser V2", "CrossRef"],  # ✅ 修复名称，使用精确搜索
+                processors=["Site Parser V2", "ArXiv Official API", "CrossRef", "Semantic Scholar"],  # ✅ 优先使用ArXiv搜索，避免Semantic Scholar超时
                 priority=2
             ),
             Route(

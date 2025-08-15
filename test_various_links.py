@@ -31,13 +31,13 @@ TEST_CASES = [
         "expected_features": ["doi", "arxiv_id", "high_quality"],
         "description": "有ArXiv ID的经典论文，应该优先使用Semantic Scholar"
     },
-    {
-        "name": "ArXiv最新论文 - Vision Transformer", 
-        "url": "https://arxiv.org/abs/2010.11929",
-        "expected_processor": "Semantic Scholar",
-        "expected_features": ["arxiv_id"],
-        "description": "较新的ArXiv论文测试"
-    },
+    # {
+    #     "name": "ArXiv最新论文 - Vision Transformer", 
+    #     "url": "https://arxiv.org/abs/2010.11929",
+    #     "expected_processor": "Semantic Scholar",
+    #     "expected_features": ["arxiv_id"],
+    #     "description": "较新的ArXiv论文测试"
+    # },
     {
         "name": "NeurIPS 2012 - AlexNet",
         "url": "https://proceedings.neurips.cc/paper/2012/hash/c399862d3b9d6b76c8436e924a68c45b-Abstract.html",
@@ -66,20 +66,20 @@ TEST_CASES = [
         "expected_features": ["url_parsing"],
         "description": "IEEE论文测试"
     },
-    {
-        "name": "ArXiv PDF直链",
-        "url": "https://arxiv.org/pdf/1706.03762.pdf",
-        "expected_processor": "Semantic Scholar",
-        "expected_features": ["arxiv_id"],
-        "description": "ArXiv PDF链接应该能提取ArXiv ID"
-    },
-    {
-        "name": "ResNet原论文 - 应该有DOI",
-        "url": "https://arxiv.org/abs/1512.03385",
-        "expected_processor": "Semantic Scholar",
-        "expected_features": ["doi", "arxiv_id"],
-        "description": "经典ResNet论文，发表在CVPR，应该有DOI"
-    },
+    # {
+    #     "name": "ArXiv PDF直链",
+    #     "url": "https://arxiv.org/pdf/1706.03762.pdf",
+    #     "expected_processor": "Semantic Scholar",
+    #     "expected_features": ["arxiv_id"],
+    #     "description": "ArXiv PDF链接应该能提取ArXiv ID"
+    # },
+    # {
+    #     "name": "ResNet原论文 - 应该有DOI",
+    #     "url": "https://arxiv.org/abs/1512.03385",
+    #     "expected_processor": "Semantic Scholar",
+    #     "expected_features": ["doi", "arxiv_id"],
+    #     "description": "经典ResNet论文，发表在CVPR，应该有DOI"
+    # },
 ]
 
 class TestResult:

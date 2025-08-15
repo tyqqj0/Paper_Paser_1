@@ -77,6 +77,6 @@ class ACMAdapter(URLAdapter):
                 source_page_url=url,
                 venue="ACM",
                 confidence=0.98, # 直接从URL提取DOI，置信度非常高
-                source="acm_url_extraction"
+                source_adapter="acm_url_extraction"
             )
         return None

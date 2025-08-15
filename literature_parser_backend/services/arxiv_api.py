@@ -60,6 +60,48 @@ class ArXivAPIClient:
             logger.error(f"Error fetching from arXiv API: {e}")
             return None
     
+    def search_by_title(self, title: str, max_results: int = 5) -> List[Dict[str, Any]]:
+        """
+        通过标题搜索arXiv论文
+        
+        Args:
+            title: 论文标题
+            max_results: 最大返回结果数
+            
+        Returns:
+            匹配的论文列表
+        """
+        logger.info(f"Searching arXiv by title: {title}")
+        
+        try:
+            # 构建搜索查询
+            # 使用title字段搜索，并清理标题中的特殊字符
+            search_query = f'ti:"{title}"'
+            
+            params = {
+                "search_query": search_query,
+                "max_results": max_results,
+                "sortBy": "relevance",
+                "sortOrder": "descending"
+            }
+            
+            response = self.request_manager.get(
+                url=self.base_url,
+                request_type=RequestType.EXTERNAL,
+                params=params,
+                timeout=self.timeout
+            )
+            
+            if response.status_code == 200:
+                return self._parse_arxiv_search_response(response.text, title)
+            else:
+                logger.warning(f"arXiv search API returned status {response.status_code}")
+                return []
+                
+        except Exception as e:
+            logger.error(f"Error searching arXiv by title: {e}")
+            return []
+    
     def _parse_arxiv_response(self, xml_content: str, arxiv_id: str) -> Optional[Dict[str, Any]]:
         """
         解析arXiv API的XML响应
@@ -172,6 +214,71 @@ class ArXivAPIClient:
         except Exception as e:
             logger.error(f"Error parsing arXiv response: {e}")
             return None
+    
+    def _parse_arxiv_search_response(self, xml_content: str, search_title: str) -> List[Dict[str, Any]]:
+        """
+        解析arXiv搜索API的XML响应
+        
+        Args:
+            xml_content: XML响应内容
+            search_title: 搜索的标题（用于日志）
+            
+        Returns:
+            解析后的论文列表
+        """
+        try:
+            results = []
+            # 解析XML
+            root = ET.fromstring(xml_content)
+            
+            # 定义命名空间
+            namespaces = {
+                'atom': 'http://www.w3.org/2005/Atom',
+                'arxiv': 'http://arxiv.org/schemas/atom'
+            }
+            
+            # 查找所有entry元素
+            entries = root.findall('atom:entry', namespaces)
+            
+            if not entries:
+                logger.info(f"No arXiv results found for title: {search_title}")
+                return []
+            
+            logger.info(f"Found {len(entries)} arXiv results for title search")
+            
+            for entry in entries:
+                # 提取arXiv ID
+                id_elem = entry.find('atom:id', namespaces)
+                if id_elem is None:
+                    continue
+                    
+                # 从URL中提取arXiv ID
+                arxiv_url = id_elem.text.strip()
+                arxiv_id = self.extract_arxiv_id_from_url(arxiv_url)
+                if not arxiv_id:
+                    continue
+                
+                # 使用现有的解析逻辑解析单个entry
+                entry_xml = ET.tostring(entry, encoding='unicode')
+                # 创建一个临时的根元素包装这个entry
+                temp_xml = f'''<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">
+{entry_xml}
+</feed>'''
+                
+                paper_data = self._parse_arxiv_response(temp_xml, arxiv_id)
+                if paper_data:
+                    results.append(paper_data)
+            
+            logger.info(f"Successfully parsed {len(results)} arXiv papers from search")
+            return results
+            
+        except ET.ParseError as e:
+            logger.error(f"XML parsing error for arXiv search response: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"Error parsing arXiv search response: {e}")
+            return []
     
     def convert_to_metadata_model(self, arxiv_data: Dict[str, Any]) -> MetadataModel:
         """
