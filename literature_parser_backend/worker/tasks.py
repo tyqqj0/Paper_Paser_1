@@ -39,8 +39,52 @@ from .utils import (
     extract_authoritative_identifiers,
     update_task_status,
 )
+# 🆕 导入智能路由器 (替代原有的SmartExecutor)
+from .execution.smart_router import SmartRouter
 
 logger = logging.getLogger(__name__)
+
+
+# ===============================================
+# 🆕 Smart Routing Logic
+# ===============================================
+
+def should_use_smart_routing(url: str) -> bool:
+    """
+    判断是否使用智能路由快速处理
+    
+    Args:
+        url: 输入URL
+        
+    Returns:
+        True if 应该使用智能路由
+    """
+    if not url:
+        return False
+        
+    url_lower = url.lower()
+    
+    # 高置信度URL模式 - 适合快速路径处理
+    fast_patterns = [
+        'arxiv.org/abs',           # ArXiv论文
+        'arxiv.org/pdf',           # ArXiv PDF
+        'doi.org',                 # DOI直链
+        'dx.doi.org',              # DOI直链 (旧格式)
+        'proceedings.neurips.cc',  # NeurIPS会议论文
+        'papers.nips.cc',          # NeurIPS论文 (旧域名)
+    ]
+    
+    for pattern in fast_patterns:
+        if pattern in url_lower:
+            logger.debug(f"🎯 URL匹配快速路径模式: {pattern}")
+            return True
+    
+    # 检查URL中是否包含DOI
+    if 'doi.org' in url_lower or '/doi/' in url_lower:
+        logger.debug(f"🎯 URL包含DOI，适合快速路径")
+        return True
+        
+    return False
 
 
 # ===============================================
@@ -669,7 +713,51 @@ async def _process_literature_async(
         task_manager.update_task_progress("任务开始", 0)
 
         dao = LiteratureDAO.create_from_task_connection(database)
+        
+        # 🆕 智能路由系统 - 专注路由选择和数据管道
+        url = source.get('url', '')
+        if should_use_smart_routing(url):
+            logger.info(f"🚀 Task {task_id}: 启动智能路由系统: {url}")
+            
+            try:
+                # 使用新的智能路由器 - 负责路由选择和数据管道
+                smart_router = SmartRouter(dao)
+                router_result = await smart_router.route_and_process(url, source, task_id)
+                
+                # 检查智能路由结果
+                if router_result.get('status') == 'completed':
+                    logger.info(f"✅ Task {task_id}: 智能路由完成，耗时: {router_result.get('execution_time', 0):.2f}s")
+                    
+                    # 转换为标准任务结果格式
+                    result_type = 'duplicate' if router_result.get('result_type') == 'duplicate' else 'created'
+                    final_result = task_manager.complete_task(
+                        TaskResultType.DUPLICATE if result_type == 'duplicate' else TaskResultType.CREATED,
+                        router_result.get('literature_id')
+                    )
+                    
+                    # 添加智能路由的额外信息
+                    final_result.update({
+                        'route_used': router_result.get('route_used'),
+                        'processor_used': router_result.get('processor_used'),
+                        'execution_time': router_result.get('execution_time')
+                    })
+                    
+                    return final_result
+                    
+                elif router_result.get('fallback_to_legacy'):
+                    logger.warning(f"⚠️ Task {task_id}: 智能路由建议回退: {router_result.get('error')}")
+                    # 继续执行传统流程
+                else:
+                    logger.error(f"❌ Task {task_id}: 智能路由失败: {router_result.get('error')}")
+                    # 继续执行传统流程
+                    
+            except Exception as e:
+                logger.error(f"❌ Task {task_id}: 智能路由异常: {e}")
+                # 继续执行传统流程
+        
+        # 📋 传统瀑布流处理逻辑 (保持原有逻辑作为备选方案)
 
+        '''
         # 1. Enhanced Waterfall Deduplication (now includes identifier extraction)
         logger.info(f"Task {task_id}: About to start deduplication with source: {source}")
         deduplicator = WaterfallDeduplicator(dao, task_id)
@@ -1088,6 +1176,7 @@ async def _process_literature_async(
         task_manager.update_task_progress("处理完成", 100, literature_id)
         # Return LID instead of MongoDB ObjectId for API consistency
         return task_manager.complete_task(TaskResultType.CREATED, literature.lid or literature_id)
+    '''
 
     except Exception as e:
         logger.error(f"Task {task_id} failed: {e}", exc_info=True)
