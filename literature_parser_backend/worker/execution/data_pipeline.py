@@ -27,9 +27,10 @@ class DataEvent(Enum):
 class DataPipeline:
     """数据管道 - 统一的数据处理流程"""
     
-    def __init__(self, dao):
+    def __init__(self, dao, hook_manager=None):
         self.dao = dao
-        self.hooks = []  # Hook列表
+        self.hooks = []  # Hook列表 (保留兼容性)
+        self.hook_manager = hook_manager  # 🆕 Hook管理器
         
     async def process_data(self, raw_data: Dict[str, Any], source_data: Dict[str, Any], 
                           mapping_result: Optional[Dict], route_info: Dict, task_id: str) -> Dict[str, Any]:
@@ -64,31 +65,45 @@ class DataPipeline:
                     'task_id': task_id
                 })
                 
+                # 🔧 关键修复：重复文献也要传递标识符信息
                 return {
                     'status': 'completed',
                     'result_type': 'duplicate',
                     'literature_id': duplicate_result['existing_lid'],
-                    'duplicate_reason': duplicate_result['reason']
+                    'duplicate_reason': duplicate_result['reason'],
+                    'identifiers': literature_data.get('identifiers', {}),  # 传递标识符信息
+                    'metadata': literature_data.get('metadata')  # 也传递元数据
                 }
             
             # 阶段4: 写入新文献数据
             new_literature = await self._create_literature(literature_data, task_id)
             
             # 阶段5: 触发创建完成事件
-            await self._trigger_event(DataEvent.LITERATURE_CREATED, {
+            literature_context = {
                 'literature': new_literature,
                 'source_data': source_data,
-                'task_id': task_id
-            })
+                'task_id': task_id,
+                'literature_id': new_literature['lid'],  # Hook需要的格式
+                'metadata': new_literature.get('metadata')
+            }
+            
+            await self._trigger_event(DataEvent.LITERATURE_CREATED, literature_context)
+            
+            # 🆕 同时触发HookManager事件 
+            if self.hook_manager:
+                await self._trigger_hook_events(new_literature, literature_context)
             
             logger.info(f"✅ [数据管道] 文献创建完成: {new_literature['lid']}")
             
+            # 🔧 关键修复：包含标识符信息在返回结果中
             return {
                 'status': 'completed',
                 'result_type': 'created', 
                 'literature_id': new_literature['lid'],
                 'processor_used': raw_data.get('processor_used'),
-                'confidence': raw_data.get('confidence')
+                'confidence': raw_data.get('confidence'),
+                'identifiers': literature_data.get('identifiers', {}),  # 传递标识符信息
+                'metadata': literature_data.get('metadata')  # 也传递元数据供引用解析使用
             }
             
         except Exception as e:
@@ -465,3 +480,19 @@ class DataPipeline:
         """处理文献创建事件"""
         # 可以在这里添加别名创建、关系建立等逻辑
         logger.info(f"🆕 [数据管道] 处理文献创建: {context['literature']['lid']}")
+    
+    async def _trigger_hook_events(self, new_literature: Dict, context: Dict[str, Any]):
+        """触发HookManager事件"""
+        try:
+            # 1. 先触发元数据更新事件 (会触发引用获取)
+            logger.info(f"🎯 [数据管道] 触发元数据更新事件: {new_literature['lid']}")
+            metadata_result = await self.hook_manager.trigger_event('metadata_updated', context)
+            logger.info(f"✅ [数据管道] 元数据事件完成: {metadata_result.get('summary', {})}")
+            
+            # 2. 触发文献创建事件 (会触发别名创建、节点升级等)
+            logger.info(f"🎯 [数据管道] 触发文献创建事件: {new_literature['lid']}")
+            creation_result = await self.hook_manager.trigger_event('literature_created', context)
+            logger.info(f"✅ [数据管道] 创建事件完成: {creation_result.get('summary', {})}")
+            
+        except Exception as e:
+            logger.error(f"❌ [数据管道] Hook事件触发失败: {e}")

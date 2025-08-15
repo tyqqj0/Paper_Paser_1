@@ -713,36 +713,62 @@ class RelationshipDAO(BaseNeo4jDAO):
                 batch_nodes = []
                 batch_relationships = []
                 
+                # 🆕 批次内去重映射：避免同一批次中的重复
+                current_batch_lid_mapping = {}      # {original_lid: final_lid}
+                current_batch_title_mapping = {}    # {normalized_title: final_lid}
+                
                 for citation in unresolved_citations:
                     original_lid = citation["placeholder_lid"]
                     reference_data = citation["reference_data"]
                     
-                    # 🆕 智能去重检查：基于标题匹配现有未解析节点
-                    final_lid = original_lid
-                    should_create_node = True
-                    
-                    if "parsed_data" in reference_data and reference_data["parsed_data"]:
-                        parsed_data = reference_data["parsed_data"]
-                        if isinstance(parsed_data, dict) and "title" in parsed_data:
-                            title = parsed_data["title"]
-                            normalized_title = normalize_title_for_matching(title)
-                            
-                            if normalized_title and normalized_title in existing_unresolved:
-                                # 找到相同标题的现有节点，重用其LID
+                    # 🆕 Step 2.1: 检查批次内是否已处理过相同的LID
+                    if original_lid in current_batch_lid_mapping:
+                        final_lid = current_batch_lid_mapping[original_lid]
+                        logger.debug(f"📦 Batch LID dedup: {original_lid} → {final_lid}")
+                    else:
+                        # 🆕 Step 2.2: 检查是否有相同标题（数据库或当前批次）
+                        final_lid = original_lid
+                        should_create_node = True
+                        normalized_title = None
+                        
+                        # 提取并标准化标题
+                        if "parsed_data" in reference_data and reference_data["parsed_data"]:
+                            parsed_data = reference_data["parsed_data"]
+                            if isinstance(parsed_data, dict) and "title" in parsed_data:
+                                title = parsed_data["title"]
+                                normalized_title = normalize_title_for_matching(title)
+                        
+                        if normalized_title:
+                            # 优先检查当前批次中的标题重复
+                            if normalized_title in current_batch_title_mapping:
+                                final_lid = current_batch_title_mapping[normalized_title]
+                                should_create_node = False
+                                logger.debug(
+                                    f"📦 Batch title dedup: {original_lid} → {final_lid} "
+                                    f"('{title[:50]}...')"
+                                )
+                            # 然后检查数据库中的现有节点
+                            elif normalized_title in existing_unresolved:
                                 final_lid = existing_unresolved[normalized_title]
                                 should_create_node = False
                                 logger.debug(
                                     f"♻️ Reusing existing unresolved node: "
                                     f"{original_lid} → {final_lid} ('{title[:50]}...')"
                                 )
-                    
-                    # 记录去重后的引用
-                    if final_lid not in deduplicated_citations:
-                        deduplicated_citations[final_lid] = {
-                            "original_lid": original_lid,
-                            "reference_data": reference_data,
-                            "should_create_node": should_create_node
-                        }
+                            else:
+                                # 这是新的标题，记录到当前批次映射中
+                                current_batch_title_mapping[normalized_title] = original_lid
+                        
+                        # 记录批次内LID映射
+                        current_batch_lid_mapping[original_lid] = final_lid
+                        
+                        # 记录去重后的引用
+                        if final_lid not in deduplicated_citations:
+                            deduplicated_citations[final_lid] = {
+                                "original_lid": original_lid,
+                                "reference_data": reference_data,
+                                "should_create_node": should_create_node
+                            }
                     
                     # 添加关系数据（每个引用都需要创建关系，即使节点被重用）
                     batch_relationships.append({

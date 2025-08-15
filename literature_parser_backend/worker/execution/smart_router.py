@@ -15,6 +15,7 @@ from ..metadata.registry import get_global_registry
 from ..metadata.base import IdentifierData
 from .routing import RouteManager
 from .data_pipeline import DataPipeline
+from .hooks import HookManager
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +29,11 @@ class SmartRouter:
         self.metadata_registry = get_global_registry()
         self.route_manager = RouteManager()
         
+        # 🆕 Hook管理器
+        self.hook_manager = HookManager(dao) if dao else None
+        
         # 数据管道 (负责所有数据库操作)
-        self.data_pipeline = DataPipeline(dao) if dao else None
+        self.data_pipeline = DataPipeline(dao, self.hook_manager) if dao else None
         
     async def route_and_process(self, url: str, source_data: Dict[str, Any], task_id: str) -> Dict[str, Any]:
         """

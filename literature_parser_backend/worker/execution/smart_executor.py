@@ -100,9 +100,9 @@ class SmartExecutor:
             # 阶段4: 结果整合
             final_result = self._build_final_result(context, execution_results, route)
             
-            # 🆕 阶段5: Hook后处理 (暂时注释，先确保基础功能正常)
-            # if self.hook_manager and final_result.get('status') == 'completed':
-            #     await self._trigger_post_processing_hooks(final_result, context)
+            # 🆕 阶段5: Hook后处理
+            if self.hook_manager and final_result.get('status') == 'completed':
+                await self._trigger_post_processing_hooks(final_result, context)
             
             execution_time = (datetime.now() - start_time).total_seconds()
             final_result['execution_time'] = execution_time

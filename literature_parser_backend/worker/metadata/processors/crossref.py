@@ -605,12 +605,32 @@ class CrossRefProcessor(MetadataProcessor):
         # 提取摘要
         abstract = crossref_data.get("abstract")
         
+        # 🔧 关键修复：提取 DOI 信息
+        doi = crossref_data.get("DOI")
+        
+        # 🔧 关键修复：提取其他标识符信息
+        external_ids = {}
+        if doi:
+            external_ids["DOI"] = doi
+        
+        # 检查是否有 ArXiv ID 或其他标识符
+        if crossref_data.get("URL"):
+            url = crossref_data["URL"]
+            if "arxiv.org" in url.lower():
+                # 尝试从URL中提取ArXiv ID
+                import re
+                arxiv_match = re.search(r'arxiv\.org/(?:abs|pdf)/([^/?]+)', url, re.IGNORECASE)
+                if arxiv_match:
+                    external_ids["ArXiv"] = arxiv_match.group(1)
+        
         return MetadataModel(
             title=title,
             authors=authors,
             year=year,
             journal=journal,
             abstract=abstract,
+            doi=doi,  # 🔧 添加 DOI 字段
+            external_ids=external_ids if external_ids else None,  # 🔧 添加外部标识符
             source_priority=[self.name]
         )
 
