@@ -57,7 +57,7 @@ class CrossRefProcessor(MetadataProcessor):
         """
         检查是否可以处理给定的标识符。
         
-        支持：DOI直接查询，或有标题的情况下进行搜索。
+        支持：DOI直接查询，或有标题+作者的精确搜索。
         
         Args:
             identifiers: 标准化的标识符数据
@@ -69,8 +69,9 @@ class CrossRefProcessor(MetadataProcessor):
         if identifiers.doi:
             return True
             
-        # 如果有标题，可以进行搜索
-        if identifiers.title and len(identifiers.title.strip()) > 10:
+        # 🆕 精确搜索：需要标题+作者组合，避免模糊搜索
+        if (identifiers.title and len(identifiers.title.strip()) > 10 and 
+            identifiers.authors and len(identifiers.authors) > 0):
             return True
             
         return False
@@ -98,10 +99,12 @@ class CrossRefProcessor(MetadataProcessor):
                     return result
                 logger.info("DOI查询失败，尝试标题搜索...")
             
-            # 2. 标题搜索（如果有标题）
-            if identifiers.title:
-                logger.info(f"🔍 CrossRef标题搜索: '{identifiers.title[:50]}...'")
-                result = await self._process_by_title(identifiers.title, identifiers.year)
+            # 2. 精确搜索（标题+作者）
+            if identifiers.title and identifiers.authors:
+                logger.info(f"🔍 CrossRef精确搜索: '{identifiers.title[:50]}...' + {len(identifiers.authors)}个作者")
+                result = await self._process_by_title_and_author(
+                    identifiers.title, identifiers.authors, identifiers.year
+                )
                 if result.success:
                     return result
             
@@ -160,6 +163,86 @@ class CrossRefProcessor(MetadataProcessor):
                 source=self.name
             )
     
+    async def _process_by_title_and_author(
+        self, 
+        title: str, 
+        authors: List[str],
+        year: Optional[int] = None
+    ) -> ProcessorResult:
+        """
+        通过标题+作者精确搜索CrossRef元数据。
+        
+        使用组合查询参数避免百万级模糊搜索。
+        
+        Args:
+            title: 论文标题
+            authors: 作者列表
+            year: 可选的发表年份
+            
+        Returns:
+            ProcessorResult with 搜索结果
+        """
+        try:
+            # 1. 使用精确组合搜索
+            candidates = await self._search_crossref_precise(title, authors, year, limit=10)
+            
+            if not candidates:
+                return ProcessorResult(
+                    success=False,
+                    error="CrossRef: No precise search results found",
+                    source=self.name
+                )
+            
+            logger.info(f"🔍 CrossRef精确搜索返回{len(candidates)}个候选结果")
+            
+            # 2. 由于是精确搜索，使用较宽松的匹配模式
+            filtered_results = TitleMatchingUtils.filter_crossref_candidates(
+                target_title=title,
+                candidates=candidates,
+                mode=MatchingMode.STANDARD  # 🆕 精确搜索后可用标准模式
+            )
+            
+            if not filtered_results:
+                return ProcessorResult(
+                    success=False,
+                    error="CrossRef: No results passed similarity filter",
+                    source=self.name
+                )
+            
+            # 3. 选择最佳匹配（优先考虑年份）
+            best_candidate, similarity_score = self._select_best_candidate(
+                filtered_results, target_year=year
+            )
+            
+            logger.info(f"✅ 选择最佳匹配: 相似度={similarity_score:.3f}")
+            
+            # 4. 转换为标准元数据格式
+            metadata = self._convert_crossref_to_metadata(best_candidate)
+
+            # 提取DOI
+            new_doi = best_candidate.get("DOI")
+            new_identifiers = {"doi": new_doi} if new_doi else None
+            
+            # 5. 调整置信度（精确搜索置信度更高）
+            confidence = min(0.95, similarity_score * 0.95)  # 🆕 精确搜索置信度更高
+            
+            return ProcessorResult(
+                success=True,
+                metadata=metadata,
+                raw_data=best_candidate,
+                confidence=confidence,
+                source=self.name,
+                new_identifiers=new_identifiers
+            )
+            
+        except Exception as e:
+            logger.error(f"CrossRef精确搜索失败: {e}")
+            return ProcessorResult(
+                success=False,
+                error=f"CrossRef精确搜索失败: {str(e)}",
+                source=self.name
+            )
+
     async def _process_by_title(
         self, 
         title: str, 
@@ -213,6 +296,10 @@ class CrossRefProcessor(MetadataProcessor):
             
             # 4. 转换为标准元数据格式
             metadata = self._convert_crossref_to_metadata(best_candidate)
+
+            # 提取DOI
+            new_doi = best_candidate.get("DOI")
+            new_identifiers = {"doi": new_doi} if new_doi else None
             
             # 5. 调整置信度（基于相似度）
             confidence = min(0.9, similarity_score * 0.9)  # 最高0.9，基于相似度调整
@@ -222,7 +309,8 @@ class CrossRefProcessor(MetadataProcessor):
                 metadata=metadata,
                 raw_data=best_candidate,
                 confidence=confidence,
-                source=self.name
+                source=self.name,
+                new_identifiers=new_identifiers  # 传递新发现的DOI
             )
             
         except Exception as e:
@@ -233,6 +321,122 @@ class CrossRefProcessor(MetadataProcessor):
                 source=self.name
             )
     
+    async def _search_crossref_precise(
+        self, 
+        title: str, 
+        authors: List[str],
+        year: Optional[int] = None,
+        limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        使用CrossRef API进行精确搜索。
+        
+        组合标题、作者和年份参数，避免百万级模糊搜索。
+        
+        Args:
+            title: 论文标题
+            authors: 作者列表
+            year: 发表年份
+            limit: 最大结果数量
+            
+        Returns:
+            CrossRef结果列表
+        """
+        try:
+            # 🆕 构建精确搜索参数（使用CrossRef支持的参数格式）
+            params = []
+            
+            # 选择主要作者（通常是第一作者或最知名作者）
+            primary_author = self._select_primary_author(authors)
+            if primary_author:
+                # 提取姓氏用于搜索
+                author_surname = self._extract_surname(primary_author)
+                if author_surname:
+                    params.append(f"query.author={quote(author_surname)}")
+            
+            # 🆕 使用通用query参数而不是query.title
+            title_keywords = self._extract_title_keywords(title)
+            if title_keywords:
+                params.append(f"query={quote(title_keywords)}")
+            
+            # 🆕 暂时跳过年份限制，因为CrossRef API不支持这些参数
+            # 年份匹配将在后续的过滤阶段进行
+            
+            # 构建URL
+            url = f"https://api.crossref.org/works?{'&'.join(params)}&rows={limit}"
+            
+            headers = {
+                "Accept": "application/json",
+                "User-Agent": "LiteratureParser/1.0"
+            }
+            
+            logger.info(f"🎯 CrossRef精确搜索: 作者={primary_author}, 标题关键词={title_keywords}")
+            logger.debug(f"CrossRef精确搜索URL: {url[:100]}...")
+            
+            response = self.request_manager.get(
+                url=url,
+                request_type=RequestType.EXTERNAL,
+                headers=headers,
+                timeout=20
+            )
+            
+            if response.status_code != 200:
+                logger.warning(f"CrossRef API返回状态码: {response.status_code}")
+                return []
+            
+            data = response.json()
+            items = data.get('message', {}).get('items', [])
+            total_results = data.get('message', {}).get('total-results', 0)
+            
+            logger.info(f"✅ CrossRef精确搜索返回{len(items)}个结果 (总数: {total_results})")
+            
+            # 记录前几个结果的标题用于调试
+            for i, item in enumerate(items[:3]):
+                item_title = ""
+                if item.get('title'):
+                    if isinstance(item['title'], list) and item['title']:
+                        item_title = item['title'][0]
+                    elif isinstance(item['title'], str):
+                        item_title = item['title']
+                logger.debug(f"   结果{i+1}: '{item_title[:60]}...'")
+            
+            return items
+            
+        except Exception as e:
+            logger.error(f"CrossRef精确搜索失败: {e}")
+            return []
+    
+    def _select_primary_author(self, authors: List[str]) -> Optional[str]:
+        """选择主要作者用于搜索"""
+        if not authors:
+            return None
+        # 简单策略：选择第一作者
+        return authors[0] if authors else None
+    
+    def _extract_surname(self, author_name: str) -> Optional[str]:
+        """从作者姓名中提取姓氏"""
+        if not author_name:
+            return None
+        # 简单策略：假设最后一个词是姓氏
+        parts = author_name.strip().split()
+        return parts[-1] if parts else None
+    
+    def _extract_title_keywords(self, title: str, max_words: int = 3) -> str:
+        """从标题中提取关键词，避免过度模糊搜索"""
+        if not title:
+            return ""
+        
+        # 移除常见停用词
+        stopwords = {'a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 
+                    'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being'}
+        
+        words = [word.strip('.,!?;:()[]{}') for word in title.lower().split()]
+        keywords = [word for word in words if len(word) > 3 and word not in stopwords]
+        
+        # 选择前几个关键词
+        selected_keywords = keywords[:max_words]
+        return ' '.join(selected_keywords)
+
     async def _search_crossref_by_title_direct(
         self, 
         title: str, 
@@ -414,5 +618,4 @@ class CrossRefProcessor(MetadataProcessor):
 # 自动注册处理器
 from ..registry import register_processor
 register_processor(CrossRefProcessor)
-
 

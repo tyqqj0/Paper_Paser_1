@@ -165,13 +165,14 @@ def extract_authoritative_identifiers(
                     "title": mapping_result.title,
                     "year": mapping_result.year,
                     "venue": mapping_result.venue,
+                    "authors": mapping_result.authors,  # 🆕 添加遗漏的作者字段！
                     "source_page_url": mapping_result.source_page_url,
                     "pdf_url": mapping_result.pdf_url,
                     "source_adapter": mapping_result.source_adapter,
                     "strategy_used": mapping_result.strategy_used,
                     "confidence": mapping_result.confidence
                 }
-                logger.info(f"✅ URL映射提取到有用信息: title={bool(mapping_result.title)}, venue={mapping_result.venue}")
+                logger.info(f"✅ URL映射提取到有用信息: title={bool(mapping_result.title)}, venue={mapping_result.venue}, authors={len(mapping_result.authors) if mapping_result.authors else 0}")
 
             # 如果URL映射服务找到了标识符，直接返回
             if identifiers.doi or identifiers.arxiv_id:

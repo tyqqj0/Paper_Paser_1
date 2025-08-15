@@ -138,14 +138,34 @@ class URLMappingService:
         logger.debug(f"开始映射URL: {url}")
         original_url = url
 
-        # 1. PDF智能重定向检查
+        # 1. 提前分离专门适配器和通用适配器（修复变量未定义bug）
+        specialized_adapters = [a for a in self.adapters if a.name != "generic"]
+        generic_adapters = [a for a in self.adapters if a.name == "generic"]
+
+        # 2. PDF智能重定向检查
         redirect_info = self._check_pdf_redirect(url)
         if redirect_info:
             logger.info(f"🔄 PDF重定向: {url} → {redirect_info['canonical_url']}")
             logger.info(f"📝 重定向原因: {redirect_info['redirect_reason']}")
             url = redirect_info['canonical_url']  # 使用重定向后的URL继续处理
 
-        # 2. URL有效性验证
+        # 3. URL有效性验证
+        # 对于某些适配器（如ACM），我们可能希望直接从URL提取标识符，而不是进行HTTP验证
+        # 检查适配器是否有优先的 extract_identifier_from_url 方法
+        for adapter in specialized_adapters + generic_adapters:
+            if adapter.can_handle(url) and hasattr(adapter, 'extract_identifier_from_url'):
+                logger.debug(f"尝试使用适配器 {adapter.name} 的 extract_identifier_from_url 方法")
+                direct_extraction_result = await adapter.extract_identifier_from_url(url)
+                if direct_extraction_result and direct_extraction_result.is_successful():
+                    logger.info(f"✅ 成功通过 {adapter.name} 直接从URL提取标识符")
+                    if redirect_info:
+                        direct_extraction_result.original_url = original_url
+                        direct_extraction_result.canonical_url = redirect_info['canonical_url']
+                        direct_extraction_result.redirect_reason = redirect_info['redirect_reason']
+                    return direct_extraction_result
+                else:
+                    logger.debug(f"适配器 {adapter.name} 未能直接从URL提取标识符或提取失败")
+
         if self.enable_url_validation and not skip_url_validation:
             logger.info(f"🔍 验证URL有效性: {url}")
             if not self._validate_url(url):
@@ -161,10 +181,6 @@ class URLMappingService:
                 return result
             else:
                 logger.info(f"✅ URL验证通过: {url}")
-
-        # 3. 分离专门适配器和通用适配器
-        specialized_adapters = [a for a in self.adapters if a.name != "generic"]
-        generic_adapters = [a for a in self.adapters if a.name == "generic"]
 
         # 4. 首先尝试专门适配器
         for adapter in specialized_adapters:

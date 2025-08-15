@@ -40,7 +40,7 @@ class MetadataFetcher:
         source_data: Dict[str, Any],
         pre_fetched_metadata: Optional[MetadataModel] = None,
         pdf_content: Optional[bytes] = None,
-    ) -> Tuple[Optional[MetadataModel], Dict[str, Any]]:
+    ) -> Tuple[Optional[MetadataModel], Dict[str, Any], Dict[str, Any]]:
         """
         Fetch metadata using the waterfall approach with registered processors.
         
@@ -51,14 +51,14 @@ class MetadataFetcher:
             pdf_content: Optional PDF content for parsing
             
         Returns:
-            Tuple of (MetadataModel, raw_data) or (None, error_info)
+            Tuple of (MetadataModel, raw_data, new_identifiers) or (None, error_info, {})
         """
         logger.info(f"Starting metadata fetch with {len(self.registry.list_processors())} registered processors")
         
         # 1. Check pre-fetched metadata first
         if pre_fetched_metadata and pre_fetched_metadata.title != "Unknown Title":
             logger.info("✅ Using pre-fetched metadata")
-            return pre_fetched_metadata, {"source": "pre-fetched"}
+            return pre_fetched_metadata, {"source": "pre-fetched"}, {}
         
         # 2. Preprocess and standardize identifiers
         identifier_data = self._preprocess_identifiers(
@@ -72,6 +72,7 @@ class MetadataFetcher:
         logger.info(f"  - URL: {identifier_data.url}")
         logger.info(f"  - PDF URL: {identifier_data.pdf_url}")
         logger.info(f"  - Title: {identifier_data.title}")
+        logger.info(f"  - Authors: {len(identifier_data.authors) if identifier_data.authors else 0}个")  # 🆕 显示作者数量
         logger.info(f"  - Has PDF Content: {bool(identifier_data.pdf_content)}")
         # --- 结束调试日志 ---
         
@@ -126,7 +127,7 @@ class MetadataFetcher:
                             # For backward compatibility
                             pass
                     
-                    return result.metadata, result.raw_data or {}
+                    return result.metadata, result.raw_data or {}, result.new_identifiers or {}
                 else:
                     logger.info(f"❌ {processor.name} failed: {result.error}")
                     last_error = result.error
@@ -143,8 +144,9 @@ class MetadataFetcher:
         return None, {
             "error": "All metadata sources failed",
             "attempted_sources": attempted_sources,
+
             "last_error": last_error
-        }
+        }, {}
     
     def _preprocess_identifiers(
         self,
@@ -178,9 +180,11 @@ class MetadataFetcher:
                 identifier_data.title = url_mapping.get("title")
                 identifier_data.year = url_mapping.get("year")
                 identifier_data.venue = url_mapping.get("venue")
+                identifier_data.authors = url_mapping.get("authors")  # 🆕 提取作者信息
                 
                 logger.debug(f"Extracted from URL mapping: title='{identifier_data.title}', "
-                           f"year={identifier_data.year}, venue='{identifier_data.venue}'")
+                           f"year={identifier_data.year}, venue='{identifier_data.venue}', "
+                           f"authors={len(identifier_data.authors) if identifier_data.authors else 0}")
         
         return identifier_data
     

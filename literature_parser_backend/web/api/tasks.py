@@ -113,13 +113,15 @@ class SimpleStatusManager:
                 if literature and literature.task_info:
                     task_info = literature.task_info
                     # 使用TaskInfoModel创建LiteratureProcessingStatus
+                    from datetime import datetime
+                    current_time = datetime.now()
                     literature_status_obj = LiteratureProcessingStatus(
                         literature_id=literature.lid,
                         overall_status=task_info.status,
                         overall_progress=task_info.component_status.get_overall_progress(),
                         component_status=task_info.component_status,
-                        created_at=literature.created_at,
-                        updated_at=literature.updated_at
+                        created_at=literature.created_at or current_time,
+                        updated_at=literature.updated_at or current_time
                     )
                     
                     # 仅当任务未完成时，才用数据库的进度覆盖

@@ -36,6 +36,7 @@ class IdentifierData:
     title: Optional[str] = None
     year: Optional[int] = None
     venue: Optional[str] = None
+    authors: Optional[List[str]] = None  # 🆕 添加作者字段支持
     
     # Additional context
     source_data: Optional[Dict[str, Any]] = None

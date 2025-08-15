@@ -786,23 +786,28 @@ async def _process_literature_async(
 
         # 获取元数据（关键组件）
         metadata_fetcher = MetadataFetcher()
-        metadata_result = await metadata_fetcher.fetch_metadata_waterfall(
+        metadata_result_obj = await metadata_fetcher.fetch_metadata_waterfall(
             identifiers=identifiers.model_dump(),
             source_data=source,
-            pre_fetched_metadata=None,  # This is now handled by the new deduplicator
-            pdf_content=None,  # This is now handled by the new deduplicator
+            pre_fetched_metadata=None,
+            pdf_content=None,
         )
 
-        # Handle result tuple safely
-        if isinstance(metadata_result, tuple) and len(metadata_result) == 2:
-            metadata, metadata_raw = metadata_result
-            metadata_source = metadata_raw.get("source", "未知来源")
-        else:
-            metadata = metadata_result
-            metadata_source = "未知来源"
+        # 解包 metadata_result_obj
+        metadata, metadata_raw, new_found_identifiers = metadata_result_obj
 
         # 检查元数据获取是否成功并更新状态 - 使用严格的质量评估
+        metadata_source = metadata_raw.get("source", "未知来源")
         metadata_quality_check = _evaluate_metadata_quality(metadata, metadata_source)
+
+        # 🆕 从ProcessorResult中提取并合并新发现的标识符
+        if new_found_identifiers:
+            for id_type, id_value in new_found_identifiers.items():
+                if id_type == "doi" and id_value and not identifiers.doi: identifiers.doi = id_value
+                elif id_type == "arxiv_id" and id_value and not identifiers.arxiv_id: identifiers.arxiv_id = id_value
+                logger.info(f"Task {task_id}: 🔄 合并新发现的标识符: {id_type}={id_value}")
+        
+        logger.info(f"Task {task_id}: 🔍 [DEBUG] 元数据获取后标识符: DOI={identifiers.doi}, ArXiv={identifiers.arxiv_id}")
 
         # NEW: Secondary deduplication after getting metadata
         if metadata and (metadata_quality_check["is_high_quality"] or metadata_quality_check["is_partial"]):

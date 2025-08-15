@@ -6,7 +6,7 @@ ACM适配器
 
 import re
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from ..core.base import URLAdapter
 from ..core.result import URLMappingResult
@@ -58,3 +58,25 @@ class ACMAdapter(URLAdapter):
         pattern = r"dl\.acm\.org/doi/(?:abs/|full/)?(10\.\d{4}/[^?\s]+)"
         match = re.search(pattern, url, re.IGNORECASE)
         return match.group(1) if match else None
+
+    async def extract_identifier_from_url(self, url: str) -> Optional[URLMappingResult]:
+        """
+        直接从URL中提取DOI作为主要标识符，无需进行HTTP请求。
+        
+        Args:
+            url: 输入URL字符串
+            
+        Returns:
+            URLMappingResult 如果成功提取到DOI，否则None。
+        """
+        doi = self.extract_doi(url)
+        if doi:
+            logger.info(f"[ACMAdapter] 直接从URL中提取到DOI: {doi}")
+            return URLMappingResult(
+                doi=doi,
+                source_page_url=url,
+                venue="ACM",
+                confidence=0.98, # 直接从URL提取DOI，置信度非常高
+                source="acm_url_extraction"
+            )
+        return None

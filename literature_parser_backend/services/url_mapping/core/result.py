@@ -25,6 +25,7 @@ class URLMappingResult:
     venue: Optional[str] = None
     year: Optional[int] = None
     title: Optional[str] = None
+    authors: Optional[list] = None  # 🆕 添加作者字段支持
     
     # URL信息
     source_page_url: Optional[str] = None
@@ -55,6 +56,7 @@ class URLMappingResult:
             self.source_page_url or
             self.pdf_url or
             self.title or
+            self.authors or  # 🆕 包含作者信息
             self.canonical_url
         )
     
@@ -71,6 +73,7 @@ class URLMappingResult:
             "venue": self.venue,
             "year": self.year,
             "title": self.title,
+            "authors": self.authors,  # 🆕 包含作者信息
             "source_page_url": self.source_page_url,
             "pdf_url": self.pdf_url,
             "canonical_url": self.canonical_url,
