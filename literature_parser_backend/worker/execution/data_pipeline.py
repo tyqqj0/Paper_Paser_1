@@ -277,9 +277,32 @@ class DataPipeline:
             
             # 优先级3: 标题+作者去重 (模糊匹配)
             if hasattr(metadata, 'title') and metadata.title:
+                # 🛡️ 特殊检查：如果是解析失败的文献（Unknown Title等），不进行去重
+                # 避免所有解析失败的文献被错误合并
+                failed_title_indicators = [
+                    "Unknown Title",
+                    "Processing...",
+                    "Extracting...",
+                    "Loading...",
+                    "Error:",
+                    "N/A"
+                ]
+                
+                is_failed_parsing = any(indicator in metadata.title for indicator in failed_title_indicators)
+                
+                if is_failed_parsing:
+                    logger.info(f"📋 [数据管道] 检测到解析失败的文献标题: {metadata.title}，跳过去重检查")
+                    return {'is_duplicate': False}
+                
                 candidates = await self.dao.find_by_title_fuzzy(metadata.title, limit=5)
                 for candidate in candidates:
                     if candidate and candidate.metadata and candidate.metadata.title:
+                        # 同样检查候选文献是否也是解析失败的
+                        candidate_is_failed = any(indicator in candidate.metadata.title for indicator in failed_title_indicators)
+                        if candidate_is_failed:
+                            logger.info(f"📋 [数据管道] 跳过解析失败的候选文献: {candidate.metadata.title}")
+                            continue
+                            
                         if self._is_title_match(metadata.title, candidate.metadata.title):
                             # 进一步检查作者匹配
                             metadata_authors = getattr(metadata, 'authors', None)

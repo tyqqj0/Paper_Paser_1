@@ -22,6 +22,37 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/literatures", tags=["文献查询"])
 
 
+def _extract_celery_error_info(result) -> tuple[str, str]:
+    """
+    Extract error information from Celery task result.
+    
+    Args:
+        result: Celery AsyncResult object
+        
+    Returns:
+        tuple: (error_message, error_type)
+    """
+    error_msg = "Unknown error"
+    error_type = "TaskExecutionError"
+    
+    if result.result:
+        if isinstance(result.result, dict):
+            # 处理结构化错误信息（从worker返回的格式）
+            error_msg = result.result.get("error", str(result.result))
+            error_type = result.result.get("exc_type", error_type)
+        else:
+            error_msg = str(result.result)
+    
+    # 如果还是没有有用的错误信息，检查Celery的其他属性
+    if error_msg == "Unknown error" or not error_msg:
+        if hasattr(result, 'traceback') and result.traceback:
+            error_msg = f"Task execution failed - see worker logs for details"
+        elif hasattr(result, 'info') and result.info:
+            error_msg = str(result.info)
+            
+    return error_msg, error_type
+
+
 def _extract_convenience_fields(literature) -> Dict[str, Any]:
     """
     Extract convenience fields from the literature model.
@@ -263,13 +294,14 @@ async def get_literature_by_doi(
                         }
                     )
                 else:
-                    error_msg = str(result.result) if result.result else "Unknown error"
-                    logger.error(f"❌ Task {task_id} failed: {error_msg}")
+                    error_msg, error_type = _extract_celery_error_info(result)
+                    logger.error(f"❌ Task {task_id} failed: {error_type}: {error_msg}")
                     return JSONResponse(
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                         content={
                             "status": "processing_failed",
                             "message": f"Processing failed: {error_msg}",
+                            "error_type": error_type,
                             "task_id": task_id
                         }
                     )
@@ -388,13 +420,14 @@ async def get_literature_by_title(
                         }
                     )
                 else:
-                    error_msg = str(result.result) if result.result else "Unknown error"
-                    logger.error(f"❌ Task {task_id} failed: {error_msg}")
+                    error_msg, error_type = _extract_celery_error_info(result)
+                    logger.error(f"❌ Task {task_id} failed: {error_type}: {error_msg}")
                     return JSONResponse(
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                         content={
                             "status": "processing_failed",
                             "message": f"Processing failed: {error_msg}",
+                            "error_type": error_type,
                             "task_id": task_id
                         }
                     )

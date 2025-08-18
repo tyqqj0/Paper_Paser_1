@@ -124,8 +124,32 @@ def _evaluate_metadata_quality(metadata: Optional[MetadataModel], source: str) -
     # 🎯 Core Requirements Assessment
     
     # Title (Essential - 25 points)
-    if not metadata.title or metadata.title in ["Unknown Title", "Processing..."]:
+    # 🛡️ 检查是否是解析失败的标识
+    failed_title_indicators = [
+        "Unknown Title",
+        "Processing...",
+        "Extracting...",
+        "Loading...",
+        "Error:",
+        "N/A"
+    ]
+    
+    is_parsing_failed = any(indicator in (metadata.title or "") for indicator in failed_title_indicators)
+    
+    if not metadata.title or is_parsing_failed:
         missing_fields.append("title")
+        if is_parsing_failed:
+            # 如果检测到解析失败标识，直接返回特殊评估结果
+            return {
+                "is_high_quality": False,
+                "is_partial": False,
+                "quality_score": 0,
+                "missing_fields": ["title", "authors", "year", "journal", "abstract"],
+                "assessment": "parsing_failed",
+                "is_fallback_only": False,
+                "is_parsing_failed": True,
+                "failed_indicators": [indicator for indicator in failed_title_indicators if indicator in (metadata.title or "")]
+            }
     else:
         quality_score += 25
         
@@ -1002,6 +1026,45 @@ async def _process_literature_async(
                     identifiers.arxiv_id = arxiv_id
             
             logger.info(f"Task {task_id}: 🔍 [DEBUG] 更新后的标识符: DOI={identifiers.doi}, ArXiv={identifiers.arxiv_id}")
+        elif metadata_quality_check.get("is_parsing_failed", False):
+            # 🛡️ 解析失败：检测到Unknown Title等失败标识
+            overall_status = await dao.update_enhanced_component_status(
+                literature_id=literature_id,
+                component="metadata",
+                status="failed",
+                stage="元数据解析失败",
+                progress=0,
+                source=metadata_source or "未知来源",
+                error_info={
+                    "error_type": "ParsingFailedError",
+                    "error_message": f"元数据解析失败，检测到失败标识: {', '.join(metadata_quality_check.get('failed_indicators', []))}",
+                    "error_details": {
+                        "failed_indicators": metadata_quality_check.get('failed_indicators', []),
+                        "original_title": metadata.title if metadata else "None",
+                        "assessment": "parsing_failed"
+                    }
+                },
+                next_action="建议重新提交或使用其他数据源",
+            )
+            logger.warning(
+                f"Metadata parsing failed due to failed indicators: {metadata_quality_check.get('failed_indicators', [])}. Overall status: {overall_status}",
+            )
+            
+            # 🛡️ 对于解析失败的情况，跳过引用解析，直接创建占位文献并标记为解析失败
+            # 确保metadata不为None，创建最小元数据
+            if metadata is None:
+                from ..models.literature import MetadataModel
+                metadata = MetadataModel(
+                    title="Parsing Failed",
+                    authors=[],
+                    year=None,
+                    journal=None,
+                    abstract=None,
+                )
+            
+            # 直接跳转到最终文献创建，但使用PARSING_FAILED状态
+            logger.info(f"Task {task_id}: 🔄 解析失败，跳过引用解析，直接创建占位文献")
+            
         elif metadata_quality_check["is_partial"]:
             # 部分成功：有基本信息但缺少重要字段
             overall_status = await dao.update_enhanced_component_status(
@@ -1308,11 +1371,26 @@ async def _process_literature_async(
         
         task_manager.update_task_progress("处理完成", 100, literature_id)
         
+        # 🛡️ 检查是否是解析失败的文献，如果是则返回特殊状态
+        is_parsing_failed = False
+        if metadata and metadata.title:
+            failed_title_indicators = [
+                "Unknown Title",
+                "Processing...",
+                "Extracting...",
+                "Loading...",
+                "Error:",
+                "N/A",
+                "Parsing Failed"
+            ]
+            is_parsing_failed = any(indicator in metadata.title for indicator in failed_title_indicators)
+        
         # 🔧 智能路由和传统流程的统一返回
         if 'smart_router_completed' in locals() and smart_router_completed:
             # 智能路由完成，合并结果
-            logger.info(f"✅ Task {task_id}: 智能路由+引用解析完成")
-            final_result = task_manager.complete_task(TaskResultType.CREATED, literature_id)
+            result_type = TaskResultType.PARSING_FAILED if is_parsing_failed else TaskResultType.CREATED
+            logger.info(f"✅ Task {task_id}: 智能路由+引用解析完成 (状态: {result_type})")
+            final_result = task_manager.complete_task(result_type, literature_id)
             
             # 添加智能路由的额外信息
             final_result.update({
@@ -1320,13 +1398,18 @@ async def _process_literature_async(
                 'processor_used': smart_router_result.get('processor_used'),
                 'smart_router_time': smart_router_result.get('execution_time'),
                 'references_count': len(references) if 'references' in locals() else 0,
-                'mode': 'smart_router_with_references'
+                'mode': 'smart_router_with_references',
+                'is_parsing_failed': is_parsing_failed
             })
             return final_result
         else:
             # 纯传统流程
+            result_type = TaskResultType.PARSING_FAILED if is_parsing_failed else TaskResultType.CREATED
+            logger.info(f"✅ Task {task_id}: 传统流程完成 (状态: {result_type})")
             # Return LID instead of MongoDB ObjectId for API consistency
-            return task_manager.complete_task(TaskResultType.CREATED, literature.lid or literature_id)
+            final_result = task_manager.complete_task(result_type, literature.lid or literature_id)
+            final_result['is_parsing_failed'] = is_parsing_failed
+            return final_result
 
 
     except Exception as e:

@@ -147,6 +147,7 @@ class TaskResultType(str, Enum):
     """任务结果类型 - 用于结果类型标识和调试"""
     CREATED = "created"       # 创建了新文献
     DUPLICATE = "duplicate"   # 发现重复文献
+    PARSING_FAILED = "parsing_failed"  # 解析失败但已创建占位文献
 
 
 
