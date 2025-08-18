@@ -23,9 +23,25 @@ class Route:
 class RouteManager:
     """路由管理器 - 决定URL使用哪些处理器"""
     
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls):
+        """单例模式实现"""
+        if cls._instance is None:
+            cls._instance = super(RouteManager, cls).__new__(cls)
+        return cls._instance
+    
     def __init__(self):
-        """初始化内置路由规则"""
-        self.routes = self._load_builtin_routes()
+        """初始化内置路由规则（只初始化一次）"""
+        if not RouteManager._initialized:
+            self.routes = self._load_builtin_routes()
+            RouteManager._initialized = True
+    
+    @classmethod
+    def get_instance(cls):
+        """获取单例实例的便捷方法"""
+        return cls()
         
     def _load_builtin_routes(self) -> List[Route]:
         """加载内置路由规则 - 简化配置，直接在代码中定义"""
@@ -43,9 +59,39 @@ class RouteManager:
                 priority=1
             ),
             Route(
+                name="ieee_fast_path",
+                patterns=["ieeexplore.ieee.org", "ieee.org", "computer.org"],
+                processors=["Site Parser V2", "CrossRef", "Semantic Scholar"],  # IEEE优先使用站点解析
+                priority=1
+            ),
+            Route(
+                name="acm_fast_path", 
+                patterns=["dl.acm.org", "acm.org"],
+                processors=["Site Parser V2", "CrossRef", "Semantic Scholar"],  # ACM数字图书馆
+                priority=1
+            ),
+            Route(
+                name="springer_fast_path",
+                patterns=["link.springer.com", "springer.com", "springerlink.com"],
+                processors=["Site Parser V2", "CrossRef", "Semantic Scholar"],  # Springer
+                priority=1
+            ),
+            Route(
+                name="elsevier_fast_path",
+                patterns=["sciencedirect.com", "elsevier.com"],
+                processors=["Site Parser V2", "CrossRef", "Semantic Scholar"],  # ScienceDirect
+                priority=1
+            ),
+            Route(
                 name="neurips_enhanced_path",
                 patterns=["proceedings.neurips.cc", "papers.nips.cc"],
                 processors=["Site Parser V2", "ArXiv Official API", "CrossRef", "Semantic Scholar"],  # ✅ 优先使用ArXiv搜索，避免Semantic Scholar超时
+                priority=2
+            ),
+            Route(
+                name="conference_papers_path",
+                patterns=["proceedings.mlr.press", "openaccess.thecvf.com", "aclanthology.org"],
+                processors=["Site Parser V2", "CrossRef", "Semantic Scholar"],  # 会议论文网站
                 priority=2
             ),
             Route(

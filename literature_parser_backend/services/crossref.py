@@ -16,7 +16,7 @@ from .request_manager import ExternalRequestManager, RequestType
 
 logger = logging.getLogger(__name__)
 
-
+# TODO: 现在的api层在为元数据解析提供原始数据，但是为引文解析提供解析后数据，比较混乱，包括其他的api层，需要统一
 class CrossRefClient:
     """
     Client for CrossRef REST API.

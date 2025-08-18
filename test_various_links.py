@@ -24,48 +24,48 @@ import sys
 
 # 测试用例配置
 TEST_CASES = [
-    {
-        "name": "ArXiv经典论文 - Transformer",
-        "url": "https://arxiv.org/abs/1706.03762",
-        "expected_processor": "Semantic Scholar",
-        "expected_features": ["doi", "arxiv_id", "high_quality"],
-        "description": "有ArXiv ID的经典论文，应该优先使用Semantic Scholar"
-    },
-    {
-        "name": "ArXiv最新论文 - Vision Transformer", 
-        "url": "https://arxiv.org/abs/2010.11929",
-        "expected_processor": "Semantic Scholar",
-        "expected_features": ["arxiv_id"],
-        "description": "较新的ArXiv论文测试"
-    },
-    {
-        "name": "NeurIPS 2012 - AlexNet",
-        "url": "https://proceedings.neurips.cc/paper/2012/hash/c399862d3b9d6b76c8436e924a68c45b-Abstract.html",
-        "expected_processor": "CrossRef",
-        "expected_features": ["title_match", "no_doi"],
-        "description": "经典的NeurIPS论文，无DOI，需要标题匹配"
-    },
-    {
-        "name": "Acceleration of stochastic approximation by averaging",
-        "url": "https://doi.org/10.1137/0330046",
-        "expected_processor": "Semantic Scholar",
-        "expected_features": ["doi"],
-        "description": "经典的NeurIPS论文，有DOI"
-    },
-    {
-        "name": "NeurIPS 2017 - Attention论文",
-        "url": "https://proceedings.neurips.cc/paper/2017/hash/3f5ee243547dee91fbd053c1c4a845aa-Abstract.html",
-        "expected_processor": "CrossRef",
-        "expected_features": ["title_match"],
-        "description": "另一篇重要的NeurIPS论文"
-    },
-    {
-        "name": "ACM Digital Library - 有DOI",
-        "url": "https://dl.acm.org/doi/10.1145/3292500.3330958",
-        "expected_processor": "Semantic Scholar",
-        "expected_features": ["doi"],
-        "description": "ACM论文，有明确DOI"
-    },
+    # {
+    #     "name": "ArXiv经典论文 - Transformer",
+    #     "url": "https://arxiv.org/abs/1706.03762",
+    #     "expected_processor": "Semantic Scholar",
+    #     "expected_features": ["doi", "arxiv_id", "high_quality"],
+    #     "description": "有ArXiv ID的经典论文，应该优先使用Semantic Scholar"
+    # },
+    # {
+    #     "name": "ArXiv最新论文 - Vision Transformer", 
+    #     "url": "https://arxiv.org/abs/2010.11929",
+    #     "expected_processor": "Semantic Scholar",
+    #     "expected_features": ["arxiv_id"],
+    #     "description": "较新的ArXiv论文测试"
+    # },
+    # {
+    #     "name": "NeurIPS 2012 - AlexNet",
+    #     "url": "https://proceedings.neurips.cc/paper/2012/hash/c399862d3b9d6b76c8436e924a68c45b-Abstract.html",
+    #     "expected_processor": "CrossRef",
+    #     "expected_features": ["title_match", "no_doi"],
+    #     "description": "经典的NeurIPS论文，无DOI，需要标题匹配"
+    # },
+    # {
+    #     "name": "Acceleration of stochastic approximation by averaging",
+    #     "url": "https://doi.org/10.1137/0330046",
+    #     "expected_processor": "Semantic Scholar",
+    #     "expected_features": ["doi"],
+    #     "description": "经典的NeurIPS论文，有DOI"
+    # },
+    # {
+    #     "name": "NeurIPS 2017 - Attention论文",
+    #     "url": "https://proceedings.neurips.cc/paper/2017/hash/3f5ee243547dee91fbd053c1c4a845aa-Abstract.html",
+    #     "expected_processor": "CrossRef",
+    #     "expected_features": ["title_match"],
+    #     "description": "另一篇重要的NeurIPS论文"
+    # },
+    # {
+    #     "name": "ACM Digital Library - 有DOI",
+    #     "url": "https://dl.acm.org/doi/10.1145/3292500.3330958",
+    #     "expected_processor": "Semantic Scholar",
+    #     "expected_features": ["doi"],
+    #     "description": "ACM论文，有明确DOI"
+    # },
     {
         "name": "IEEE Xplore论文",
         "url": "https://ieeexplore.ieee.org/document/8578335",

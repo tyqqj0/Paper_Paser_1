@@ -28,6 +28,7 @@ from ..services import GrobidClient
 from ..services.lid_generator import LIDGenerator
 from ..db.alias_dao import AliasDAO
 from ..models.alias import AliasType, extract_aliases_from_source
+from .execution.smart_router import SmartRouter
 from ..utils.title_matching import MatchingMode, TitleMatchingUtils
 from .celery_app import celery_app
 from .content_fetcher import ContentFetcher
@@ -43,48 +44,6 @@ from .utils import (
 from .execution.smart_router import SmartRouter
 
 logger = logging.getLogger(__name__)
-
-
-# ===============================================
-# 🆕 Smart Routing Logic
-# ===============================================
-
-def should_use_smart_routing(url: str) -> bool:
-    """
-    判断是否使用智能路由快速处理
-    
-    Args:
-        url: 输入URL
-        
-    Returns:
-        True if 应该使用智能路由
-    """
-    if not url:
-        return False
-        
-    url_lower = url.lower()
-    
-    # 高置信度URL模式 - 适合快速路径处理
-    fast_patterns = [
-        'arxiv.org/abs',           # ArXiv论文
-        'arxiv.org/pdf',           # ArXiv PDF
-        'doi.org',                 # DOI直链
-        'dx.doi.org',              # DOI直链 (旧格式)
-        'proceedings.neurips.cc',  # NeurIPS会议论文
-        'papers.nips.cc',          # NeurIPS论文 (旧域名)
-    ]
-    
-    for pattern in fast_patterns:
-        if pattern in url_lower:
-            logger.debug(f"🎯 URL匹配快速路径模式: {pattern}")
-            return True
-    
-    # 检查URL中是否包含DOI
-    if 'doi.org' in url_lower or '/doi/' in url_lower:
-        logger.debug(f"🎯 URL包含DOI，适合快速路径")
-        return True
-        
-    return False
 
 
 # ===============================================
@@ -740,12 +699,19 @@ async def _process_literature_async(
         
         # 🆕 智能路由系统 - 专注路由选择和数据管道
         url = source.get('url', '')
-        if should_use_smart_routing(url):
-            logger.info(f"🚀 Task {task_id}: 启动智能路由系统: {url}")
+        
+        # 🚀 优化：先用轻量级方法判断是否能处理，避免不必要的SmartRouter实例化
+        # 使用单例路由管理器进行快速判断
+        from .execution.routing import RouteManager
+        route_manager = RouteManager.get_instance()
+        route = route_manager.determine_route(url)
+        
+        # 只有在能处理时才创建SmartRouter实例
+        if route and route.name != "standard_waterfall":  # 标准瀑布流说明没有专门路由
+            logger.info(f"🚀 Task {task_id}: 智能路由启动: {url} -> {route.name}")
+            smart_router = SmartRouter(dao)
             
             try:
-                # 使用新的智能路由器 - 负责路由选择和数据管道
-                smart_router = SmartRouter(dao)
                 router_result = await smart_router.route_and_process(url, source, task_id)
                 
                 # 检查智能路由结果
@@ -1188,7 +1154,7 @@ async def _process_literature_async(
             logger.warning(f"⚠️ Task {task_id}: 跳过引用解析，因为缺少必要的 literature_id")
             
             # 🔄 返回一个基本完成状态，避免任务崩溃
-            return task_manager.complete_task(TaskResultType.FAILED, None)
+            return task_manager.complete_task(TaskResultType.PARSING_FAILED, None)
         
         # 4. Fetch References (Critical Component) - 优先处理关键组件
         update_task_status("获取参考文献", progress=40)
@@ -1431,9 +1397,11 @@ def process_literature_task(self: Task, source: Dict[str, Any]) -> Dict[str, Any
     """Celery task entry point for literature processing."""
     try:
         # 🔍 DEBUG: Check what data Worker receives from API
-        logger.info(f"📋 [WORKER] Task {self.request.id} received source data:")
+        logger.info("🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢")
+        logger.info(f"📋 [WORKER] 🚀【任务日志开始】Task {self.request.id} received source data:")
         logger.info(f"📋 [WORKER] Source keys: {list(source.keys()) if source else 'None'}")
         logger.info(f"📋 [WORKER] Source data: {source}")
+        logger.info("🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢")
         
         # Check specific identifiers field
         if 'identifiers' in source:

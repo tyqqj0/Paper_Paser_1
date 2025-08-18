@@ -27,7 +27,7 @@ class SmartRouter:
         # 路由组件
         self.url_mapping_service = get_url_mapping_service()
         self.metadata_registry = get_global_registry()
-        self.route_manager = RouteManager()
+        self.route_manager = RouteManager.get_instance()
         
         # 🆕 Hook管理器
         self.hook_manager = HookManager(dao) if dao else None
@@ -35,6 +35,35 @@ class SmartRouter:
         # 数据管道 (负责所有数据库操作)
         self.data_pipeline = DataPipeline(dao, self.hook_manager) if dao else None
         
+    def can_handle(self, url: str) -> bool:
+        """
+        判断SmartRouter是否能处理此URL
+        
+        Args:
+            url: 输入URL
+            
+        Returns:
+            True if 可以通过智能路由处理，False if 需要回退到legacy处理
+        """
+        if not url:
+            return False
+            
+        try:
+            # 使用RouteManager判断是否有合适的路由
+            route = self.route_manager.determine_route(url)
+            
+            # 如果找到了非兜底路由，说明可以处理
+            if route and route.name != "fallback_route":
+                logger.debug(f"🎯 SmartRouter可以处理: {url} -> {route.name}")
+                return True
+            else:
+                logger.debug(f"⚠️ SmartRouter无法处理: {url} -> 回退到legacy")
+                return False
+                
+        except Exception as e:
+            logger.warning(f"❌ SmartRouter路由判断异常: {url} -> {e}")
+            return False
+
     async def route_and_process(self, url: str, source_data: Dict[str, Any], task_id: str) -> Dict[str, Any]:
         """
         智能路由和处理入口

@@ -64,7 +64,7 @@ class SmartExecutor:
         # 复用现有组件
         self.url_mapping_service = get_url_mapping_service()
         self.metadata_registry = get_global_registry()
-        self.route_manager = RouteManager()
+        self.route_manager = RouteManager.get_instance()
         
         # 🆕 Hook系统 (如果提供了DAO)
         self.hook_manager = HookManager(dao) if dao else None
