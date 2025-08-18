@@ -148,6 +148,9 @@ class TaskResultType(str, Enum):
     CREATED = "created"       # 创建了新文献
     DUPLICATE = "duplicate"   # 发现重复文献
     PARSING_FAILED = "parsing_failed"  # 解析失败但已创建占位文献
+    URL_NOT_FOUND = "url_not_found"    # URL返回404错误
+    URL_ACCESS_FAILED = "url_access_failed"  # URL无法访问(网络错误、超时等)
+    INVALID_URL = "invalid_url"        # URL格式错误
 
 
 

@@ -7,10 +7,21 @@
 import re
 import logging
 import requests
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 from urllib.parse import urljoin, urlparse
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PageFetchResult:
+    """页面获取结果"""
+    success: bool
+    content: Optional[str] = None
+    status_code: Optional[int] = None
+    error_message: Optional[str] = None
+    error_type: Optional[str] = None
 
 
 class PageParser:
@@ -29,7 +40,7 @@ class PageParser:
     @classmethod
     def fetch_page(cls, url: str, timeout: int = 10, headers: Optional[Dict[str, str]] = None) -> Optional[str]:
         """
-        获取页面内容
+        获取页面内容 - 兼容性方法，仍返回None或字符串
         
         Args:
             url: 页面URL
@@ -39,6 +50,22 @@ class PageParser:
         Returns:
             页面HTML内容，失败时返回None
         """
+        result = cls.fetch_page_with_details(url, timeout, headers)
+        return result.content if result.success else None
+    
+    @classmethod
+    def fetch_page_with_details(cls, url: str, timeout: int = 10, headers: Optional[Dict[str, str]] = None) -> PageFetchResult:
+        """
+        获取页面内容，包含详细的错误信息
+        
+        Args:
+            url: 页面URL
+            timeout: 超时时间（秒）
+            headers: 自定义请求头
+            
+        Returns:
+            PageFetchResult 包含成功状态、内容和错误信息
+        """
         try:
             request_headers = headers or cls.DEFAULT_HEADERS
             
@@ -47,14 +74,54 @@ class PageParser:
             
             if response.status_code == 200:
                 logger.debug(f"页面获取成功: {len(response.text)} 字符")
-                return response.text
-            else:
+                return PageFetchResult(
+                    success=True,
+                    content=response.text,
+                    status_code=200
+                )
+            elif response.status_code == 404:
+                error_msg = f"页面不存在: {url}"
                 logger.warning(f"页面访问失败，状态码: {response.status_code}")
-                return None
+                return PageFetchResult(
+                    success=False,
+                    status_code=404,
+                    error_message=error_msg,
+                    error_type="url_not_found"
+                )
+            else:
+                error_msg = f"HTTP错误 {response.status_code}: {url}"
+                logger.warning(f"页面访问失败，状态码: {response.status_code}")
+                return PageFetchResult(
+                    success=False,
+                    status_code=response.status_code,
+                    error_message=error_msg,
+                    error_type="http_error"
+                )
                 
+        except requests.exceptions.Timeout:
+            error_msg = f"请求超时: {url}"
+            logger.error(f"页面获取超时: {url}")
+            return PageFetchResult(
+                success=False,
+                error_message=error_msg,
+                error_type="timeout"
+            )
+        except requests.exceptions.ConnectionError:
+            error_msg = f"连接失败: {url}"
+            logger.error(f"页面连接失败: {url}")
+            return PageFetchResult(
+                success=False,
+                error_message=error_msg,
+                error_type="connection_error"
+            )
         except requests.RequestException as e:
+            error_msg = f"网络请求失败: {str(e)}"
             logger.error(f"页面获取失败: {e}")
-            return None
+            return PageFetchResult(
+                success=False,
+                error_message=error_msg,
+                error_type="network_error"
+            )
     
     @classmethod
     def extract_title(cls, content: str) -> Optional[str]:

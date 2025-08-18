@@ -787,13 +787,16 @@ async def _process_literature_async(
                     
                 elif router_result.get('fallback_to_legacy'):
                     logger.warning(f"⚠️ Task {task_id}: 智能路由建议回退: {router_result.get('error')}")
+                    smart_router_result = router_result  # 保存错误信息
                     # 继续执行传统流程
                 else:
                     logger.error(f"❌ Task {task_id}: 智能路由失败: {router_result.get('error')}")
+                    smart_router_result = router_result  # 保存错误信息
                     # 继续执行传统流程
                     
             except Exception as e:
                 logger.error(f"❌ Task {task_id}: 智能路由异常: {e}")
+                smart_router_result = {'error': str(e), 'error_type': 'system_error'}  # 保存异常信息
                 # 继续执行传统流程
         
         # 📋 传统瀑布流处理逻辑 (保持原有逻辑作为备选方案)
@@ -1153,8 +1156,18 @@ async def _process_literature_async(
             logger.warning(f"⚠️ Task {task_id}: 智能路由未完成，但传统流程被注释")
             logger.warning(f"⚠️ Task {task_id}: 跳过引用解析，因为缺少必要的 literature_id")
             
-            # 🔄 返回一个基本完成状态，避免任务崩溃
-            return task_manager.complete_task(TaskResultType.PARSING_FAILED, None)
+            # 🔄 根据智能路由的错误类型返回相应的TaskResultType
+            router_error_type = smart_router_result.get('error_type') if 'smart_router_result' in locals() else None
+            
+            if router_error_type == "url_not_found":
+                result_type = TaskResultType.URL_NOT_FOUND
+            elif router_error_type == "url_access_failed":
+                result_type = TaskResultType.URL_ACCESS_FAILED
+            else:
+                result_type = TaskResultType.PARSING_FAILED
+            
+            logger.info(f"🔄 Task {task_id}: 返回错误类型 {result_type} (基于 {router_error_type})")
+            return task_manager.complete_task(result_type, None)
         
         # 4. Fetch References (Critical Component) - 优先处理关键组件
         update_task_status("获取参考文献", progress=40)
@@ -1413,16 +1426,40 @@ def process_literature_task(self: Task, source: Dict[str, Any]) -> Dict[str, Any
         result_dict = asyncio.run(_process_literature_async(self.request.id, source))
         return result_dict
     except Exception as e:
+        # 导入自定义异常类型和结果类型
+        from .execution.exceptions import URLNotFoundException, URLAccessFailedException, ParsingFailedException
+        from ..models.task import TaskResultType
+        
         logger.error(f"Task {self.request.id} failed: {e}", exc_info=True)
-        # Directly update the task state to FAILURE with error details
-        update_task_status("处理失败", progress=100)
-        self.update_state(
-            state="FAILURE",
-            meta={"error": str(e), "exc_type": type(e).__name__},
-        )
-        # The result returned here will be available in the task's result store
-        return {
-            "status": "FAILURE",
-            "error": str(e),
-            "exc_type": type(e).__name__,
-        }
+        
+        # 根据异常类型返回不同的结果类型
+        if isinstance(e, URLNotFoundException):
+            return {
+                "result_type": TaskResultType.URL_NOT_FOUND.value,
+                "error_message": str(e),
+                "literature_id": None
+            }
+        elif isinstance(e, URLAccessFailedException):
+            return {
+                "result_type": TaskResultType.URL_ACCESS_FAILED.value,
+                "error_message": str(e),
+                "literature_id": None
+            }
+        elif isinstance(e, ParsingFailedException):
+            return {
+                "result_type": TaskResultType.PARSING_FAILED.value,
+                "error_message": str(e),
+                "literature_id": None
+            }
+        else:
+            # 其他未知异常，标记为任务失败
+            update_task_status("处理失败", progress=100)
+            self.update_state(
+                state="FAILURE",
+                meta={"error": str(e), "exc_type": type(e).__name__},
+            )
+            return {
+                "status": "FAILURE",
+                "error": str(e),
+                "exc_type": type(e).__name__,
+            }

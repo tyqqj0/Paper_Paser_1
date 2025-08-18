@@ -45,6 +45,55 @@ SITE_RULES = {
         'abstract': 'div.abstract-text > div',
         'year': 'div.u-pb-1 > span',
         'venue': 'div.u-pb-1 > a',
+    },
+    'openaccess.thecvf.com': {
+        'title': 'div#papertitle',
+        'authors': 'div#authors a',
+        'abstract': 'div#abstract',
+        'year': 'div.title',  # 年份通常在标题中
+        'venue': 'div.title', # 会议信息在标题中
+    },
+    'cv-foundation.org': {
+        'title': 'div#papertitle, title',
+        'authors': 'div#authors a, i',
+        'abstract': 'div#abstract, p',
+        'year': 'div.title, body',
+        'venue': 'div.title, body',
+    },
+    'proceedings.mlr.press': {
+        'title': 'h1.title, .paper-title, title',
+        'authors': '.authors .author, .paper-authors a',
+        'abstract': '.abstract p, #abstract',
+        'year': '.pub-details, .paper-venue',
+        'venue': '.pub-details, .paper-venue',
+    },
+    'mlr.press': {
+        'title': 'h1.title, .paper-title, title',
+        'authors': '.authors .author, .paper-authors a',
+        'abstract': '.abstract p, #abstract',
+        'year': '.pub-details, .paper-venue',
+        'venue': '.pub-details, .paper-venue',
+    },
+    'bioinf.jku.at': {
+        'title': 'h1, title, .paper-title',
+        'authors': '.authors, .author, p',
+        'abstract': '.abstract, p',
+        'year': 'body, .date, .year',
+        'venue': 'body, .venue, .journal',
+    },
+    'jku.at': {
+        'title': 'h1, title, .paper-title',
+        'authors': '.authors, .author, p',
+        'abstract': '.abstract, p',
+        'year': 'body, .date, .year',
+        'venue': 'body, .venue, .journal',
+    },
+    'nature.com': {
+        'title': 'h1.c-article-title, h1[data-test="article-title"], .c-article__title',
+        'authors': '.c-article-author-list__item a, .c-author-list a',
+        'abstract': '.c-article-section__content p, div.c-article__summary p',
+        'year': '.c-article-info-details time, .c-bibliographic-information__value',
+        'venue': '.c-journal-title, .c-bibliographic-information__value',
     }
 }
 
@@ -107,8 +156,16 @@ class SiteParserProcessor(MetadataProcessor):
                 response = self.session.get(identifiers.url, timeout=15)
                 response.raise_for_status()
                 html_content = response.text
+            except requests.HTTPError as e:
+                # 检查HTTP状态码
+                if response.status_code == 404:
+                    return ProcessorResult(success=False, error="url_not_found", source=self.name)
+                elif response.status_code >= 500:
+                    return ProcessorResult(success=False, error="url_access_failed", source=self.name)
+                else:
+                    return ProcessorResult(success=False, error=f"HTTP error {response.status_code}: {e}", source=self.name)
             except requests.RequestException as e:
-                 return ProcessorResult(success=False, error=f"Failed to download page: {e}", source=self.name)
+                return ProcessorResult(success=False, error="url_access_failed", source=self.name)
 
             soup = BeautifulSoup(html_content, 'html.parser')
 

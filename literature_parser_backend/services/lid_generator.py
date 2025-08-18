@@ -133,13 +133,14 @@ class LIDGenerator:
         # Take first letter of first 6 meaningful words
         initials = ''.join(word[0] for word in meaningful_words[:6])
         
-        # If we don't have enough meaningful words, use original words
-        if len(initials) < 3:
+        # If we have meaningful words but short initials, keep them
+        # Only fall back to all words if we have NO meaningful words
+        if len(initials) == 0:
             all_words = [word for word in words if len(word) >= 2]
             initials = ''.join(word[0] for word in all_words[:6])
         
-        # Ensure minimum length
-        if len(initials) < 3:
+        # Only use "title" as last resort if we have no words at all
+        if len(initials) == 0:
             initials = "title"
         
         return initials[:6].lower()  # Max 6 characters, lowercase

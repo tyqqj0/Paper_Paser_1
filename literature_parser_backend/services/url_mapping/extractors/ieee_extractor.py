@@ -58,10 +58,12 @@ class IEEEExtractor:
             logger.info(f"尝试通过页面解析获取IEEE文档 {doc_id} 的信息")
             
             # 获取页面内容
-            content = PageParser.fetch_page(url)
-            if not content:
-                logger.warning("无法获取IEEE页面内容")
+            fetch_result = PageParser.fetch_page_with_details(url)
+            if not fetch_result.success:
+                logger.warning(f"无法获取IEEE页面内容: {fetch_result.error_message} (错误类型: {fetch_result.error_type})")
                 return None
+            
+            content = fetch_result.content
             
             # 使用多种方法提取DOI
             doi = cls._extract_doi_from_content(content)

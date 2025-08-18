@@ -43,10 +43,19 @@ class DataPipeline:
         
         try:
             # 阶段1: 状态检查 - 判断数据是否可以处理
-            if not self._can_process_data(raw_data):
+            can_process, error_type = self._can_process_data(raw_data)
+            if not can_process:
+                error_messages = {
+                    "url_not_found": "URL不存在或返回404错误",
+                    "url_access_failed": "URL无法访问 - 网络错误或超时",
+                    "parsing_failed": "内容解析失败 - 无法提取有效的论文信息", 
+                    "invalid_data": "数据格式错误"
+                }
+                
                 return {
                     'status': 'failed',
-                    'error': 'Data quality insufficient for processing',
+                    'error': error_messages.get(error_type, 'Data quality insufficient for processing'),
+                    'error_type': error_type,
                     'data_quality': self._evaluate_data_quality(raw_data)
                 }
             
@@ -114,38 +123,46 @@ class DataPipeline:
                 'fallback_to_legacy': True
             }
     
-    def _can_process_data(self, raw_data: Dict[str, Any]) -> bool:
-        """状态检查 - 判断数据是否可以处理"""
+    def _can_process_data(self, raw_data: Dict[str, Any]) -> tuple[bool, Optional[str]]:
+        """状态检查 - 判断数据是否可以处理，返回(是否可处理, 错误类型)"""
         
         # 🔧 防护性检查
         if not raw_data or not isinstance(raw_data, dict):
             logger.warning(f"[数据管道] raw_data为空或不是字典: {type(raw_data)}")
-            return False
+            return False, "invalid_data"
         
         # 基本成功检查
         if not raw_data.get('success'):
-            logger.warning(f"[数据管道] 处理器标记为失败: {raw_data.get('error', 'Unknown error')}")
-            return False
+            error_msg = raw_data.get('error', 'Unknown error')
+            logger.warning(f"[数据管道] 处理器标记为失败: {error_msg}")
+            
+            # 分析错误类型
+            if error_msg == "url_not_found" or "404" in error_msg or "页面不存在" in error_msg:
+                return False, "url_not_found"
+            elif error_msg == "url_access_failed" or "超时" in error_msg or "timeout" in error_msg.lower() or "连接失败" in error_msg or "connection" in error_msg.lower():
+                return False, "url_access_failed"
+            else:
+                return False, "parsing_failed"
         
         # 元数据质量检查
         metadata = raw_data.get('metadata')
         if not metadata:
             logger.warning(f"[数据管道] 没有元数据")
-            return False
+            return False, "parsing_failed"
         
         # 检查标题 - MetadataModel对象应该有title属性
         try:
             title = getattr(metadata, 'title', None)
             if not title or title in ['Unknown Title', 'Processing...']:
                 logger.warning(f"[数据管道] 标题无效: {title}")
-                return False
+                return False, "parsing_failed"
             
         except Exception as e:
             logger.warning(f"[数据管道] 标题检查异常: {e}, metadata类型: {type(metadata)}")
-            return False
+            return False, "parsing_failed"
         
         logger.debug(f"[数据管道] 数据质量检查通过: {metadata.title}")
-        return True
+        return True, None
     
     def _evaluate_data_quality(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
         """评估数据质量"""

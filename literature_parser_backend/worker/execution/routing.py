@@ -83,15 +83,39 @@ class RouteManager:
                 priority=1
             ),
             Route(
+                name="nature_fast_path",
+                patterns=["nature.com/articles", "nature.com/nature"],
+                processors=["Site Parser V2", "CrossRef", "Semantic Scholar"],  # Nature期刊
+                priority=1
+            ),
+            Route(
                 name="neurips_enhanced_path",
                 patterns=["proceedings.neurips.cc", "papers.nips.cc"],
                 processors=["Site Parser V2", "ArXiv Official API", "CrossRef", "Semantic Scholar"],  # ✅ 优先使用ArXiv搜索，避免Semantic Scholar超时
                 priority=2
             ),
             Route(
+                name="cvf_enhanced_path",
+                patterns=["openaccess.thecvf.com", "cv-foundation.org"],
+                processors=["Site Parser V2", "ArXiv Official API", "CrossRef", "Semantic Scholar"],  # CV Foundation优先使用ArXiv搜索
+                priority=2
+            ),
+            Route(
+                name="mlr_press_enhanced_path",
+                patterns=["proceedings.mlr.press", "mlr.press"],
+                processors=["Site Parser V2", "ArXiv Official API", "CrossRef", "Semantic Scholar"],  # MLR Press优先使用ArXiv搜索
+                priority=2
+            ),
+            Route(
+                name="bioinformatics_enhanced_path",
+                patterns=["bioinf.jku.at", "jku.at"],
+                processors=["Site Parser V2", "CrossRef", "Semantic Scholar"],  # 生物信息学网站
+                priority=2
+            ),
+            Route(
                 name="conference_papers_path",
-                patterns=["proceedings.mlr.press", "openaccess.thecvf.com", "aclanthology.org"],
-                processors=["Site Parser V2", "CrossRef", "Semantic Scholar"],  # 会议论文网站
+                patterns=["aclanthology.org"],
+                processors=["Site Parser V2", "CrossRef", "Semantic Scholar"],  # 其他会议论文网站
                 priority=2
             ),
             Route(

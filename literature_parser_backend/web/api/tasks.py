@@ -79,9 +79,21 @@ class SimpleStatusManager:
                             overall_progress = 100
                             current_stage = "处理完成"
                             
-                            # 当任务为DUPLICATE时，阶段显示更具体信息
+                            # 根据任务结果类型显示具体信息
                             if result_type == TaskResultType.DUPLICATE:
                                 current_stage = "文献已存在（重复）"
+                            elif result_type == TaskResultType.URL_NOT_FOUND:
+                                current_stage = "URL不存在 (404错误)"
+                                execution_status = TaskExecutionStatus.FAILED
+                                error_message = "URL不存在或返回404错误，请检查链接是否正确"
+                            elif result_type == TaskResultType.URL_ACCESS_FAILED:
+                                current_stage = "URL无法访问"
+                                execution_status = TaskExecutionStatus.FAILED
+                                error_message = "URL无法访问，可能是网络错误或超时"
+                            elif result_type == TaskResultType.PARSING_FAILED:
+                                current_stage = "内容解析失败"
+                                execution_status = TaskExecutionStatus.FAILED
+                                error_message = "内容解析失败，无法提取有效的论文信息"
                             
                         else:
                             # 正常情况下，Celery成功时，结果应该是dict
@@ -93,7 +105,29 @@ class SimpleStatusManager:
                         execution_status = TaskExecutionStatus.FAILED
                         # 尝试从result.result中提取更详细的错误信息
                         error_info_dict = result.result if isinstance(result.result, dict) else {}
-                        error_message = error_info_dict.get('error', str(result.result) or "未知错误")
+                        
+                        # 检查是否有新的错误结果类型
+                        result_type = error_info_dict.get('result_type')
+                        if result_type:
+                            try:
+                                result_type_enum = TaskResultType(result_type)
+                                if result_type_enum == TaskResultType.URL_NOT_FOUND:
+                                    current_stage = "URL不存在 (404错误)"
+                                    error_message = "URL不存在或返回404错误，请检查链接是否正确"
+                                elif result_type_enum == TaskResultType.URL_ACCESS_FAILED:
+                                    current_stage = "URL无法访问"
+                                    error_message = "URL无法访问，可能是网络错误或超时"
+                                elif result_type_enum == TaskResultType.PARSING_FAILED:
+                                    current_stage = "内容解析失败"
+                                    error_message = "内容解析失败，无法提取有效的论文信息"
+                                else:
+                                    error_message = error_info_dict.get('error', str(result.result) or "未知错误")
+                            except ValueError:
+                                # 如果result_type不是有效的枚举值
+                                error_message = error_info_dict.get('error', str(result.result) or "未知错误")
+                        else:
+                            # 兼容旧的错误格式
+                            error_message = error_info_dict.get('error', str(result.result) or "未知错误")
                 
                 else:  # 任务未就绪
                     execution_status = TaskExecutionStatus.PROCESSING

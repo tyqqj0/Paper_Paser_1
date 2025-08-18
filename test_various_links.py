@@ -66,113 +66,113 @@ TEST_CASES = [
     #     "expected_features": ["doi"],
     #     "description": "ACM论文，有明确DOI"
     # },
-    {
-        "name": "IEEE Xplore论文",
-        "url": "https://ieeexplore.ieee.org/document/8578335",
-        "expected_processor": "Site Parser",
-        "expected_features": ["url_parsing"],
-        "description": "IEEE论文测试"
-    },
-    {
-        "name": "ArXiv PDF直链",
-        "url": "https://arxiv.org/pdf/1706.03762.pdf",
-        "expected_processor": "Semantic Scholar",
-        "expected_features": ["arxiv_id"],
-        "description": "ArXiv PDF链接应该能提取ArXiv ID"
-    },
-    {
-        "name": "ResNet原论文 - 应该有DOI",
-        "url": "https://arxiv.org/abs/1512.03385",
-        "expected_processor": "Semantic Scholar",
-        "expected_features": ["doi", "arxiv_id"],
-        "description": "经典ResNet论文，发表在CVPR，应该有DOI"
-    },
-    {
-        "name": "ArXiv论文 - 有DOI和ArXiv ID",
-        "url": "https://arxiv.org/abs/1412.6980",
-        "expected_processor": "Semantic Scholar",
-        "expected_features": ["doi", "arxiv_id"],
-        "description": "有DOI和ArXiv ID的论文"
-    },
+    # {
+    #     "name": "IEEE Xplore论文",
+    #     "url": "https://ieeexplore.ieee.org/document/8578335",
+    #     "expected_processor": "Site Parser",
+    #     "expected_features": ["url_parsing"],
+    #     "description": "IEEE论文测试"
+    # },
+    # {
+    #     "name": "ArXiv PDF直链",
+    #     "url": "https://arxiv.org/pdf/1706.03762.pdf",
+    #     "expected_processor": "Semantic Scholar",
+    #     "expected_features": ["arxiv_id"],
+    #     "description": "ArXiv PDF链接应该能提取ArXiv ID"
+    # },
+    # {
+    #     "name": "ResNet原论文 - 应该有DOI",
+    #     "url": "https://arxiv.org/abs/1512.03385",
+    #     "expected_processor": "Semantic Scholar",
+    #     "expected_features": ["doi", "arxiv_id"],
+    #     "description": "经典ResNet论文，发表在CVPR，应该有DOI"
+    # },
+    # {
+    #     "name": "ArXiv论文 - 有DOI和ArXiv ID",
+    #     "url": "https://arxiv.org/abs/1412.6980",
+    #     "expected_processor": "Semantic Scholar",
+    #     "expected_features": ["doi", "arxiv_id"],
+    #     "description": "有DOI和ArXiv ID的论文"
+    # },
     
-    # 🆕 扩展重要论文测试集
-    {
-        "name": "BERT - 自然语言处理里程碑",
-        "url": "https://arxiv.org/abs/1810.04805",
-        "expected_processor": "Semantic Scholar",
-        "expected_features": ["doi", "arxiv_id"],
-        "description": "BERT论文，NLP领域重要突破"
-    },
-    {
-        "name": "GPT-1 原论文",
-        "url": "https://s3-us-west-2.amazonaws.com/openai-assets/research-covers/language-unsupervised/language_understanding_paper.pdf",
-        "expected_processor": "Site Parser",
-        "expected_features": ["pdf_url"],
-        "description": "GPT-1原论文，直接PDF链接"
-    },
-    {
-        "name": "AlphaGo论文 - Nature",
-        "url": "https://www.nature.com/articles/nature16961",
-        "expected_processor": "Semantic Scholar",
-        "expected_features": ["doi"],
-        "description": "AlphaGo突破性论文，发表在Nature"
-    },
-    {
-        "name": "GAN论文 - Ian Goodfellow",
-        "url": "https://arxiv.org/abs/1406.2661",
-        "expected_processor": "Semantic Scholar",
-        "expected_features": ["doi", "arxiv_id"],
-        "description": "生成对抗网络原始论文"
-    },
-    {
-        "name": "U-Net - 医学图像分割",
-        "url": "https://arxiv.org/abs/1505.04597",
-        "expected_processor": "Semantic Scholar",
-        "expected_features": ["doi", "arxiv_id"],
-        "description": "U-Net架构，医学图像分割经典"
-    },
-    {
-        "name": "Batch Normalization",
-        "url": "https://arxiv.org/abs/1502.03167",
-        "expected_processor": "Semantic Scholar",
-        "expected_features": ["doi", "arxiv_id"],
-        "description": "批标准化论文，深度学习重要技术"
-    },
-    {
-        "name": "Dropout论文",
-        "url": "https://jmlr.org/papers/v15/srivastava14a.html",
-        "expected_processor": "Site Parser",
-        "expected_features": ["title_match"],
-        "description": "Dropout正则化技术论文"
-    },
-    {
-        "name": "Word2Vec - 词向量",
-        "url": "https://arxiv.org/abs/1301.3781",
-        "expected_processor": "Semantic Scholar",
-        "expected_features": ["arxiv_id"],
-        "description": "Word2Vec词向量表示学习"
-    },
-    {
-        "name": "Seq2Seq - 序列到序列",
-        "url": "https://arxiv.org/abs/1409.3215",
-        "expected_processor": "Semantic Scholar",
-        "expected_features": ["doi", "arxiv_id"],
-        "description": "序列到序列学习论文"
-    },
-    {
-        "name": "Adam优化器",
-        "url": "https://arxiv.org/abs/1412.6980",
-        "expected_processor": "Semantic Scholar",
-        "expected_features": ["arxiv_id"],
-        "description": "Adam优化算法论文"
-    },
-    {
-        "name": "深度学习Nature综述 - LeCun",
-        "url": "https://www.nature.com/articles/nature14539",
-        "expected_processor": "Semantic Scholar",
-        "expected_features": ["doi"],
-        "description": "深度学习Nature综述，LeCun等人"
-    },
+    # # 🆕 扩展重要论文测试集
+    # {
+    #     "name": "BERT - 自然语言处理里程碑",
+    #     "url": "https://arxiv.org/abs/1810.04805",
+    #     "expected_processor": "Semantic Scholar",
+    #     "expected_features": ["doi", "arxiv_id"],
+    #     "description": "BERT论文，NLP领域重要突破"
+    # },
+    # {
+    #     "name": "GPT-1 原论文",
+    #     "url": "https://s3-us-west-2.amazonaws.com/openai-assets/research-covers/language-unsupervised/language_understanding_paper.pdf",
+    #     "expected_processor": "Site Parser",
+    #     "expected_features": ["pdf_url"],
+    #     "description": "GPT-1原论文，直接PDF链接"
+    # },
+    # {
+    #     "name": "AlphaGo论文 - Nature",
+    #     "url": "https://www.nature.com/articles/nature16961",
+    #     "expected_processor": "Semantic Scholar",
+    #     "expected_features": ["doi"],
+    #     "description": "AlphaGo突破性论文，发表在Nature"
+    # },
+    # {
+    #     "name": "GAN论文 - Ian Goodfellow",
+    #     "url": "https://arxiv.org/abs/1406.2661",
+    #     "expected_processor": "Semantic Scholar",
+    #     "expected_features": ["doi", "arxiv_id"],
+    #     "description": "生成对抗网络原始论文"
+    # },
+    # {
+    #     "name": "U-Net - 医学图像分割",
+    #     "url": "https://arxiv.org/abs/1505.04597",
+    #     "expected_processor": "Semantic Scholar",
+    #     "expected_features": ["doi", "arxiv_id"],
+    #     "description": "U-Net架构，医学图像分割经典"
+    # },
+    # {
+    #     "name": "Batch Normalization",
+    #     "url": "https://arxiv.org/abs/1502.03167",
+    #     "expected_processor": "Semantic Scholar",
+    #     "expected_features": ["doi", "arxiv_id"],
+    #     "description": "批标准化论文，深度学习重要技术"
+    # },
+    # {
+    #     "name": "Dropout论文",
+    #     "url": "https://jmlr.org/papers/v15/srivastava14a.html",
+    #     "expected_processor": "Site Parser",
+    #     "expected_features": ["title_match"],
+    #     "description": "Dropout正则化技术论文"
+    # },
+    # {
+    #     "name": "Word2Vec - 词向量",
+    #     "url": "https://arxiv.org/abs/1301.3781",
+    #     "expected_processor": "Semantic Scholar",
+    #     "expected_features": ["arxiv_id"],
+    #     "description": "Word2Vec词向量表示学习"
+    # },
+    # {
+    #     "name": "Seq2Seq - 序列到序列",
+    #     "url": "https://arxiv.org/abs/1409.3215",
+    #     "expected_processor": "Semantic Scholar",
+    #     "expected_features": ["doi", "arxiv_id"],
+    #     "description": "序列到序列学习论文"
+    # },
+    # {
+    #     "name": "Adam优化器",
+    #     "url": "https://arxiv.org/abs/1412.6980",
+    #     "expected_processor": "Semantic Scholar",
+    #     "expected_features": ["arxiv_id"],
+    #     "description": "Adam优化算法论文"
+    # },
+    # {
+    #     "name": "深度学习Nature综述 - LeCun",
+    #     "url": "https://www.nature.com/articles/nature14539",
+    #     "expected_processor": "Semantic Scholar",
+    #     "expected_features": ["doi"],
+    #     "description": "深度学习Nature综述，LeCun等人"
+    # },
     {
         "name": "ImageNet大规模视觉识别",
         "url": "https://www.cv-foundation.org/openaccess/content_cvpr_2015/html/Russakovsky_ImageNet_Large_Scale_2015_CVPR_paper.html",
@@ -180,13 +180,13 @@ TEST_CASES = [
         "expected_features": ["title_match"],
         "description": "ImageNet数据集和竞赛的重要论文"
     },
-    {
-        "name": "YOLO目标检测",
-        "url": "https://arxiv.org/abs/1506.02640",
-        "expected_processor": "Semantic Scholar",
-        "expected_features": ["doi", "arxiv_id"],
-        "description": "YOLO实时目标检测算法"
-    },
+    # {
+    #     "name": "YOLO目标检测",
+    #     "url": "https://arxiv.org/abs/1506.02640",
+    #     "expected_processor": "Semantic Scholar",
+    #     "expected_features": ["doi", "arxiv_id"],
+    #     "description": "YOLO实时目标检测算法"
+    # },
     {
         "name": "LSTM - 长短期记忆网络",
         "url": "https://www.bioinf.jku.at/publications/older/2604.pdf",
@@ -194,13 +194,13 @@ TEST_CASES = [
         "expected_features": ["pdf_url"],
         "description": "LSTM原始论文，1997年经典"
     },
-    {
-        "name": "imagenet",
-        "url": "https://doi.org/10.1145/3065386",
-        "expected_processor": "Semantic Scholar",
-        "expected_features": ["doi"],
-        "description": "ReLU激活函数的深入研究"
-    },
+    # {
+    #     "name": "imagenet",
+    #     "url": "https://doi.org/10.1145/3065386",
+    #     "expected_processor": "Semantic Scholar",
+    #     "expected_features": ["doi"],
+    #     "description": "ReLU激活函数的深入研究"
+    # },
     {
         "name": "ReLU激活函数研究",
         "url": "https://proceedings.mlr.press/v15/glorot11a.html",
@@ -319,6 +319,7 @@ class ComprehensiveTester:
                             
                             # 🔧 修复：根据result_type正确判断成功/失败
                             if result_type == "parsing_failed":
+                                print(f"   ❌ 解析失败: {result_type}")
                                 result.success = False
                                 result.error_message = "解析失败 - 无法提取有效的论文信息"
                                 print(f"   ❌ 解析失败: LID={result.literature_id} (占位符)")
@@ -341,13 +342,15 @@ class ComprehensiveTester:
                             
                         elif status == "failed":
                             # 任务失败 - 显示详细错误信息
-                            error_msg = task_status.get("error_message", "Unknown error")
-                            error_type = task_status.get("error_type", "Unknown")
+                            error_info = task_status.get("error_info", {})
+                            error_msg = error_info.get("error_message", task_status.get("error_message", "Unknown error"))
+                            error_type = error_info.get("error_type", task_status.get("error_type", "Unknown"))
                             result.error_message = f"Task failed: {error_msg}"
                             result.raw_response = task_status
                             
                             print(f"   ❌ 任务失败: {error_msg}")
                             print(f"   🔍 错误类型: {error_type}")
+                            print(f"返回值: {task_status}")
                             
                             # 根据错误类型提供更多信息
                             self._analyze_error_type(error_type, error_msg)

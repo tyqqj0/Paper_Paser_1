@@ -203,6 +203,17 @@ class URLMappingService:
                     else:
                         logger.debug(f"适配器 {adapter.name} 未找到有效标识符或有用信息")
                 except Exception as e:
+                    # 导入自定义异常类型
+                    try:
+                        from ....worker.execution.exceptions import URLNotFoundException, URLAccessFailedException, ParsingFailedException
+                        # 如果是特定的错误类型，应该向上传递而不是继续尝试其他适配器
+                        if isinstance(e, (URLNotFoundException, URLAccessFailedException, ParsingFailedException)):
+                            logger.error(f"适配器 {adapter.name} 遇到特定错误，向上传递: {e}")
+                            raise e
+                    except ImportError:
+                        # 如果无法导入异常类型，继续原有逻辑
+                        pass
+                    
                     logger.warning(f"适配器 {adapter.name} 处理URL失败: {e}")
                     continue
 
@@ -228,6 +239,17 @@ class URLMappingService:
                     else:
                         logger.debug(f"通用适配器 {adapter.name} 未找到有效标识符或有用信息")
                 except Exception as e:
+                    # 导入自定义异常类型
+                    try:
+                        from ....worker.execution.exceptions import URLNotFoundException, URLAccessFailedException, ParsingFailedException
+                        # 如果是特定的错误类型，应该向上传递而不是继续尝试其他适配器
+                        if isinstance(e, (URLNotFoundException, URLAccessFailedException, ParsingFailedException)):
+                            logger.error(f"通用适配器 {adapter.name} 遇到特定错误，向上传递: {e}")
+                            raise e
+                    except ImportError:
+                        # 如果无法导入异常类型，继续原有逻辑
+                        pass
+                    
                     logger.warning(f"通用适配器 {adapter.name} 处理URL失败: {e}")
                     continue
 

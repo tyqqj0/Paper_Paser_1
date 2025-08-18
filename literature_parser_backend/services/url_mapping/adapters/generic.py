@@ -12,6 +12,7 @@ from ..core.result import URLMappingResult
 from ..strategies.database_strategy import DatabaseStrategy
 from ..extractors.doi_extractor import DOIExtractor
 from ..extractors.page_parser import PageParser
+from ....worker.execution.exceptions import URLNotFoundException, URLAccessFailedException
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +35,9 @@ async def generic_doi_extraction_func(url: str, context: Dict[str, Any]) -> Opti
             return result
         
         # 方法2: 尝试页面解析提取DOI
-        content = PageParser.fetch_page(url)
-        if content:
-            doi = DOIExtractor.extract_from_content(content)
+        fetch_result = PageParser.fetch_page_with_details(url)
+        if fetch_result.success and fetch_result.content:
+            doi = DOIExtractor.extract_from_content(fetch_result.content)
             if doi:
                 logger.info(f"✅ 从页面内容提取到DOI: {doi}")
                 
@@ -47,11 +48,22 @@ async def generic_doi_extraction_func(url: str, context: Dict[str, Any]) -> Opti
                 result.confidence = 0.8  # 较高置信度
                 
                 # 尝试提取标题
-                title = PageParser.extract_title(content)
+                title = PageParser.extract_title(fetch_result.content)
                 if title:
                     result.title = title
                 
                 return result
+        elif not fetch_result.success:
+            # 记录具体的URL访问错误
+            logger.warning(f"❌ 页面访问失败: {fetch_result.error_message} (错误类型: {fetch_result.error_type})")
+            
+            # 根据错误类型抛出特定的异常
+            if fetch_result.error_type == "url_not_found":
+                raise URLNotFoundException(f"URL不存在: {url}")
+            elif fetch_result.error_type in ["http_error", "connection_error", "timeout"]:
+                raise URLAccessFailedException(f"URL无法访问: {fetch_result.error_message}")
+            else:
+                # 其他错误类型，继续返回None让上层处理
         
         logger.info(f"❌ 通用DOI提取未找到结果")
         return None
