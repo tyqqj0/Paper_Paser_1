@@ -30,8 +30,9 @@ try:
     from . import site_parser
     logger.debug("✅ 网站解析处理器已注册")
     
-    # TODO: 导入其他处理器
+    # 导入GROBID处理器
     # from . import grobid
+    # logger.debug("✅ GROBID处理器已注册")
     
     logger.info("✅ 所有元数据处理器自动注册完成")
     

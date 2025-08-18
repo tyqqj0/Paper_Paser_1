@@ -111,7 +111,7 @@ class AliasDAO(BaseNeo4jDAO):
         """
         try:
             # 导入LiteratureDAO来查询文献
-            from .literature_dao import LiteratureDAO
+            from .dao import LiteratureDAO
             
             dao = LiteratureDAO()
             literature = await dao.find_by_lid(lid)

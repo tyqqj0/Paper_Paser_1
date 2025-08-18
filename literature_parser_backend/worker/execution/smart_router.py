@@ -221,12 +221,19 @@ class SmartRouter:
             }
     
     async def _execute_standard_path(self, processors, identifier_data: IdentifierData) -> Dict[str, Any]:
-        """标准路径 - 并行执行多个处理器"""
+        """标准路径 - 智能增强执行多个处理器"""
         logger.info(f"🔄 [智能路由] 标准路径: {[p.name for p in processors]}")
         
-        # 简化版本：依次尝试处理器，找到第一个成功的
+        best_result = None
+        best_confidence = 0.0
+        attempted_processors = []
+        
+        # 增强逻辑：尝试所有处理器，选择最佳结果
         for processor in processors:
             try:
+                attempted_processors.append(processor.name)
+                logger.info(f"🔍 [智能路由] 尝试处理器: {processor.name}")
+                
                 # 兼容同步/异步处理器
                 import inspect
                 if inspect.iscoroutinefunction(processor.process):
@@ -237,27 +244,46 @@ class SmartRouter:
                     result = await loop.run_in_executor(None, processor.process, identifier_data)
                 
                 if result and result.is_valid:
-                    logger.info(f"✅ [智能路由] 标准路径成功: {processor.name}")
-                    return {
-                        'processor_used': processor.name,
-                        'confidence': result.confidence,
-                        'metadata': result.metadata,
-                        'new_identifiers': result.new_identifiers,
-                        'success': True
-                    }
+                    logger.info(f"✅ [智能路由] 处理器成功: {processor.name} (置信度: {result.confidence:.2f})")
+                    
+                    # 选择最佳结果：置信度高于当前最佳或者当前最佳为空
+                    if result.confidence > best_confidence or best_result is None:
+                        best_result = {
+                            'processor_used': processor.name,
+                            'confidence': result.confidence,
+                            'metadata': result.metadata,
+                            'new_identifiers': result.new_identifiers,
+                            'success': True
+                        }
+                        best_confidence = result.confidence
+                        logger.info(f"🎯 [智能路由] 更新最佳结果: {processor.name} (置信度: {result.confidence:.2f})")
+                    
+                    # 🆕 智能停止条件：检查解析完整性
+                    if result.is_complete_parsing():
+                        logger.info(f"🚀 [智能路由] 解析完整，提前完成: {processor.name} (完整性检查通过)")
+                        break
+                    elif result.confidence > 0.8:
+                        logger.info(f"🚀 [智能路由] 高置信度结果，提前完成: {processor.name}")
+                        break
+                        
                 else:
-                    logger.debug(f"[智能路由] 处理器失败，尝试下一个: {processor.name}")
+                    logger.debug(f"[智能路由] 处理器失败，继续尝试: {processor.name}")
                     
             except Exception as e:
-                logger.debug(f"[智能路由] 处理器异常，尝试下一个: {processor.name}, {e}")
+                logger.debug(f"[智能路由] 处理器异常，继续尝试: {processor.name}, {e}")
                 continue
         
-        # 所有处理器都失败
-        return {
-            'processors_attempted': [p.name for p in processors],
-            'error': 'All processors failed',
-            'success': False
-        }
+        # 返回最佳结果或失败
+        if best_result:
+            logger.info(f"🏆 [智能路由] 最终选择: {best_result['processor_used']} (置信度: {best_result['confidence']:.2f})")
+            return best_result
+        else:
+            # 所有处理器都失败
+            return {
+                'processors_attempted': attempted_processors,
+                'error': 'All processors failed',
+                'success': False
+            }
     
     def _prepare_identifier_data(self, source_data: Dict, mapping_result: Optional[Dict]) -> IdentifierData:
         """准备标识符数据"""
@@ -295,11 +321,12 @@ class SmartRouter:
                 processor = self.metadata_registry.get_processor(name)
                 if processor.can_handle(identifier_data):
                     available.append(processor)
+                    logger.debug(f"[智能路由] ✅ 处理器可用: {name}")
                 else:
                     logger.debug(f"[智能路由] 处理器无法处理: {name}")
             except KeyError:
                 logger.warning(f"[智能路由] 处理器未注册: {name}")
             except Exception as e:
-                logger.warning(f"[智能路由] 获取处理器失败: {name}, 错误: {e}")
+                logger.warning(f"[智能路由] 处理器实例化失败: {name}, 错误: {e}")
                 
         return available

@@ -127,8 +127,8 @@ class GrobidClient:
         form_data = {
             "includeRawCitations": "1" if include_raw_citations else "0",
             "includeRawAffiliations": "1" if include_raw_affiliations else "0",
-            "consolidateHeader": str(consolidate_header),
-            "consolidateCitations": str(consolidate_citations),
+            "consolidateHeader": "1" if consolidate_header else "0",
+            "consolidateCitations": "1" if consolidate_citations else "0",
         }
 
         # Add coordinates parameters if specified
@@ -168,6 +168,11 @@ class GrobidClient:
         logger.info(f"GROBID_DEBUG: Full URL: {url}")
         logger.info(f"GROBID_DEBUG: Form data: {form_data}")
 
+        # Prepare headers for GROBID request
+        headers = {
+            "Accept": "application/xml",
+        }
+        
         try:
             logger.info(f"GROBID_DEBUG: Sending POST request to {url}")
             response = self.request_manager.post(
@@ -175,6 +180,7 @@ class GrobidClient:
                 request_type=RequestType.INTERNAL,
                 files=files,
                 data=form_data,
+                headers=headers,
                 timeout=self.timeout,
             )
 

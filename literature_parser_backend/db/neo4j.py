@@ -173,7 +173,7 @@ async def create_indexes() -> None:
             for index in indexes:
                 try:
                     await session.run(index)
-                    logger.info(f"✅ Created index: {index.split('FOR')[1].split('ON')[0].strip()}")
+                    # logger.info(f"✅ Created index: {index.split('FOR')[1].split('ON')[0].strip()}")
                 except Exception as e:
                     if "already exists" in str(e).lower() or "equivalent index" in str(e).lower():
                         logger.info(f"ℹ️  Index already exists")

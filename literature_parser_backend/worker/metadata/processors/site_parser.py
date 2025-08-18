@@ -199,6 +199,25 @@ class SiteParserProcessor(MetadataProcessor):
             except Exception as e:
                 logger.warning(f"[SiteParserV2] Failed to parse venue for {identifiers.url}: {e}")
 
+            # 🆕 如果规则提取失败或结果不完整，尝试meta标签回退
+            if (title == "Unknown Title" or not authors or not abstract or not year or not venue):
+                logger.info(f"[SiteParserV2] 规则提取不完整，尝试meta标签回退: {identifiers.url}")
+                meta_title, meta_authors, meta_abstract, meta_year, meta_venue = self._extract_from_meta_tags(soup, identifiers.url)
+                
+                # 用更好的数据替换空缺字段
+                if title == "Unknown Title" and meta_title != "Unknown Title":
+                    title = meta_title
+                if not authors and meta_authors:
+                    authors = meta_authors
+                if not abstract and meta_abstract:
+                    abstract = meta_abstract
+                if not year and meta_year:
+                    year = meta_year
+                if not venue and meta_venue:
+                    venue = meta_venue
+                    
+                logger.info(f"[SiteParserV2] Meta标签增强完成，作者: {len(authors)}个")
+
             metadata = MetadataModel(
                 title=title,
                 authors=authors,
@@ -227,6 +246,57 @@ class SiteParserProcessor(MetadataProcessor):
             logger.error(f"[SiteParserV2] Exception during processing {identifiers.url}: {e}", exc_info=True)
             return ProcessorResult(success=False, error=f"An unexpected error occurred: {e}", source=self.name)
             
+    def _extract_from_meta_tags(self, soup, url: str):
+        """从meta标签中提取数据（学术网站的标准方式）"""
+        title = "Unknown Title"
+        authors = []
+        abstract = None
+        year = None
+        venue = None
+        
+        try:
+            # 提取标题
+            title_meta = soup.find('meta', {'name': 'citation_title'}) or soup.find('meta', {'property': 'og:title'})
+            if title_meta:
+                title = title_meta.get('content', '').strip()
+                logger.debug(f"[SiteParserV2] Meta标签提取标题: {title}")
+            
+            # 提取作者
+            author_metas = soup.find_all('meta', {'name': 'citation_author'})
+            for author_meta in author_metas:
+                author_name = author_meta.get('content', '').strip()
+                if author_name:
+                    authors.append(AuthorModel(name=author_name))
+            
+            if authors:
+                logger.debug(f"[SiteParserV2] Meta标签提取作者: {len(authors)}个")
+            
+            # 提取摘要
+            abstract_meta = soup.find('meta', {'name': 'citation_abstract'}) or soup.find('meta', {'property': 'og:description'})
+            if abstract_meta:
+                abstract = abstract_meta.get('content', '').strip()
+                logger.debug(f"[SiteParserV2] Meta标签提取摘要: {len(abstract)}字符")
+            
+            # 提取年份
+            year_meta = soup.find('meta', {'name': 'citation_publication_date'}) or soup.find('meta', {'name': 'citation_date'})
+            if year_meta:
+                date_text = year_meta.get('content', '')
+                year_match = re.search(r'\b(19|20)\d{2}\b', date_text)
+                if year_match:
+                    year = year_match.group(0)
+                    logger.debug(f"[SiteParserV2] Meta标签提取年份: {year}")
+            
+            # 提取期刊/会议
+            venue_meta = soup.find('meta', {'name': 'citation_journal_title'}) or soup.find('meta', {'name': 'citation_conference_title'})
+            if venue_meta:
+                venue = venue_meta.get('content', '').strip()
+                logger.debug(f"[SiteParserV2] Meta标签提取期刊: {venue}")
+            
+        except Exception as e:
+            logger.warning(f"[SiteParserV2] Meta标签提取异常: {url}, 错误: {e}")
+        
+        return title, authors, abstract, year, venue
+
     def _calculate_confidence(self, metadata: MetadataModel) -> float:
         confidence = 0.0
         if metadata.title and metadata.title != "Unknown Title": confidence += 0.4

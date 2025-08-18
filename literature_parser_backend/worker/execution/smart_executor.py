@@ -1,5 +1,5 @@
 """
-智能执行器
+智能执行器 已废弃
 
 基于路由的智能处理器执行系统，自动判断并行执行。
 """
@@ -18,7 +18,7 @@ from .hooks import HookManager
 
 logger = logging.getLogger(__name__)
 
-
+"""已废弃"""
 class ExecutionContext:
     """执行上下文 - 跟踪执行状态和数据"""
     

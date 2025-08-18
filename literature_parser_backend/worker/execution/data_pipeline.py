@@ -477,10 +477,17 @@ class DataPipeline:
         """构建标识符模型"""
         try:
             from ...models.literature import IdentifiersModel
+            
+            # 构建 source_urls 列表
+            source_urls = []
+            if identifiers.get('url'):
+                source_urls.append(identifiers['url'])
+            
             return IdentifiersModel(
                 doi=identifiers.get('doi'),
                 arxiv_id=identifiers.get('arxiv_id'),
-                pmid=identifiers.get('pmid')
+                pmid=identifiers.get('pmid'),
+                source_urls=source_urls
             )
         except ImportError as e:
             logger.error(f"[数据管道] 无法导入IdentifiersModel: {e}")
@@ -488,7 +495,8 @@ class DataPipeline:
             return {
                 'doi': identifiers.get('doi'),
                 'arxiv_id': identifiers.get('arxiv_id'),
-                'pmid': identifiers.get('pmid')
+                'pmid': identifiers.get('pmid'),
+                'source_urls': [identifiers.get('url')] if identifiers.get('url') else []
             }
     
     def _build_literature_model(self, literature_data: Dict, lid: str, task_id: str):
@@ -505,13 +513,22 @@ class DataPipeline:
                 completed_at=datetime.now()
             )
             
+            # 构建内容模型，包含源信息
+            identifiers = literature_data['identifiers']
+            processor_info = literature_data.get('processor_info', {})
+            
+            content = ContentModel(
+                source_page_url=identifiers.get('url'),
+                sources_tried=[processor_info.get('processor_used', 'Unknown')] if processor_info.get('processor_used') else []
+            )
+            
             # 构建文献模型
             return LiteratureModel(
                 lid=lid,
                 task_info=task_info,
                 identifiers=self._build_identifiers_model(literature_data['identifiers']),
                 metadata=literature_data['metadata'],
-                content=ContentModel(),  # 空内容，后续填充
+                content=content,
                 references=[]  # 引用信息后续处理
             )
         except ImportError as e:

@@ -336,7 +336,8 @@ async def stream_task_status(task_id: str) -> StreamingResponse:
                                     "resource_url": current_status.resource_url
                                 })
                             elif current_status.error_info:
-                                event_data["error"] = current_status.error_info
+                                # 将TaskErrorInfo对象序列化为字典
+                                event_data["error"] = current_status.error_info.model_dump()
                             
                             yield f"event: {event_type}\n"
                             yield f"data: {json.dumps(event_data)}\n\n"

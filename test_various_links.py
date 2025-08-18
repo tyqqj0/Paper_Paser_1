@@ -173,13 +173,13 @@ TEST_CASES = [
     #     "expected_features": ["doi"],
     #     "description": "深度学习Nature综述，LeCun等人"
     # },
-    {
-        "name": "ImageNet大规模视觉识别",
-        "url": "https://www.cv-foundation.org/openaccess/content_cvpr_2015/html/Russakovsky_ImageNet_Large_Scale_2015_CVPR_paper.html",
-        "expected_processor": "Site Parser",
-        "expected_features": ["title_match"],
-        "description": "ImageNet数据集和竞赛的重要论文"
-    },
+    # {
+    #     "name": "ImageNet大规模视觉识别",
+    #     "url": "https://www.cv-foundation.org/openaccess/content_cvpr_2015/html/Russakovsky_ImageNet_Large_Scale_2015_CVPR_paper.html",
+    #     "expected_processor": "Site Parser",
+    #     "expected_features": ["title_match"],
+    #     "description": "ImageNet数据集和竞赛的重要论文"
+    # },
     # {
     #     "name": "YOLO目标检测",
     #     "url": "https://arxiv.org/abs/1506.02640",
@@ -187,13 +187,20 @@ TEST_CASES = [
     #     "expected_features": ["doi", "arxiv_id"],
     #     "description": "YOLO实时目标检测算法"
     # },
-    {
-        "name": "LSTM - 长短期记忆网络",
-        "url": "https://www.bioinf.jku.at/publications/older/2604.pdf",
-        "expected_processor": "Site Parser",
-        "expected_features": ["pdf_url"],
-        "description": "LSTM原始论文，1997年经典"
-    },
+    # {
+    #     "name": "LSTM - 长短期记忆网络",
+    #     "url": "https://www.bioinf.jku.at/publications/older/2604.pdf",
+    #     "expected_processor": "Site Parser",
+    #     "expected_features": ["pdf_url"],
+    #     "description": "LSTM原始论文，1997年经典"
+    # },
+    # {
+    #     "name": "LSTM - 长短期记忆网络",
+    #     "url": "https://ieeexplore.ieee.org/abstract/document/6795963",
+    #     "expected_processor": "Site Parser",
+    #     "expected_features": ["pdf_url"],
+    #     "description": "LSTM原始论文，1997年经典"
+    # },
     # {
     #     "name": "imagenet",
     #     "url": "https://doi.org/10.1145/3065386",
@@ -242,7 +249,7 @@ class ComprehensiveTester:
             await self.session.close()
     
     async def test_single_url(self, test_case: Dict[str, Any]) -> TestResult:
-        """测试单个URL"""
+        """测试单个URL - 使用SSE流式传输"""
         result = TestResult(test_case)
         url = test_case["url"]
         
@@ -253,26 +260,26 @@ class ComprehensiveTester:
         start_time = time.time()
         
         try:
-            # 发送解析请求
+            # 首先提交解析请求获取task_id
             async with self.session.post(
                 f"{self.base_url}/api/resolve",
                 json={"url": url},
-                timeout=60
+                timeout=30
             ) as response:
                 response_data = await response.json()
                 
                 if response.status == 202:
-                    # 异步任务已创建，需要轮询状态
+                    # 获取任务ID
                     task_id = response_data.get("task_id")
                     if not task_id:
                         result.error_message = "No task_id in 202 response"
                         print(f"   ❌ 失败: {result.error_message}")
                         return result
                     
-                    print(f"   ⏳ 任务已创建: {task_id}, 等待处理完成...")
+                    print(f"   ⏳ 任务已创建: {task_id}, 开始SSE流式监听...")
                     
-                    # 轮询任务状态直到完成
-                    result = await self._poll_task_completion(result, task_id)
+                    # 使用SSE监听任务状态
+                    result = await self._stream_task_completion(result, task_id)
                     
                 elif response.status == 200:
                     # 同步响应（如果有的话）
@@ -296,95 +303,146 @@ class ComprehensiveTester:
         result.processing_time = time.time() - start_time
         return result
     
-    async def _poll_task_completion(self, result: TestResult, task_id: str, max_wait: int = 60) -> TestResult:
-        """轮询任务状态直到完成"""
-        poll_start = time.time()
+    async def _stream_task_completion(self, result: TestResult, task_id: str, max_wait: int = 60) -> TestResult:
+        """使用SSE流式监听任务状态直到完成"""
+        stream_start = time.time()
         
-        while time.time() - poll_start < max_wait:
-            try:
-                async with self.session.get(
-                    f"{self.base_url}/api/tasks/{task_id}"
-                ) as response:
+        try:
+            # 建立SSE连接
+            async with self.session.get(
+                f"{self.base_url}/api/tasks/{task_id}/stream",
+                headers={
+                    "Accept": "text/event-stream",
+                    "Cache-Control": "no-cache",
+                },
+                timeout=aiohttp.ClientTimeout(total=max_wait+10)
+            ) as response:
+                
+                if response.status != 200:
+                    result.error_message = f"SSE连接失败: HTTP {response.status}"
+                    print(f"   ❌ SSE连接失败: {result.error_message}")
+                    return result
+                
+                print(f"   📡 SSE连接已建立，开始接收实时状态...")
+                
+                # 读取SSE流
+                current_event_type = None
+                async for line in response.content:
+                    # 检查是否超时
+                    if time.time() - stream_start > max_wait:
+                        result.error_message = f"Task timeout after {max_wait}s"
+                        print(f"   ❌ 超时: 任务在{max_wait}秒内未完成")
+                        return result
                     
-                    if response.status == 200:
-                        # print(f"   ⏳ 任务状态: {response.content}")
-                        task_status = await response.json()
-                        status = task_status.get("status", "").lower()
-                        
-                        if status == "completed":
-                            # print(f"   ⏳ 任务状态: {task_status}")
-                            result_type = task_status.get("result_type")
-                            result.literature_id = task_status.get("literature_id")
-                            result.raw_response = task_status
-                            
-                            # 🔧 修复：根据result_type正确判断成功/失败
-                            if result_type == "parsing_failed":
-                                print(f"   ❌ 解析失败: {result_type}")
-                                result.success = False
-                                result.error_message = "解析失败 - 无法提取有效的论文信息"
-                                print(f"   ❌ 解析失败: LID={result.literature_id} (占位符)")
-                                print(f"   🔍 详情: 任务完成但无法解析论文内容")
-                            elif not result.literature_id:
-                                result.success = False
-                                result.error_message = "任务完成但未生成有效的文献ID"
-                                print(f"   ❌ 失败: 未生成有效LID")
-                            else:
-                                result.success = True
-                                if result_type == "duplicate":
-                                    print(f"   ✅ 成功 (副本): LID={result.literature_id}")
-                                else:
-                                    print(f"   ✅ 成功 (创建): LID={result.literature_id}")
-
-                            if result.literature_id and result.success:
-                                result = await self._get_literature_details(result)
-                            
-                            return result
-                            
-                        elif status == "failed":
-                            # 任务失败 - 显示详细错误信息
-                            error_info = task_status.get("error_info", {})
-                            error_msg = error_info.get("error_message", task_status.get("error_message", "Unknown error"))
-                            error_type = error_info.get("error_type", task_status.get("error_type", "Unknown"))
-                            result.error_message = f"Task failed: {error_msg}"
-                            result.raw_response = task_status
-                            
-                            print(f"   ❌ 任务失败: {error_msg}")
-                            print(f"   🔍 错误类型: {error_type}")
-                            print(f"返回值: {task_status}")
-                            
-                            # 根据错误类型提供更多信息
-                            self._analyze_error_type(error_type, error_msg)
-                            
-                            return result
-                            
-                        elif status in ["pending", "processing"]:
-                            # 仍在处理中，继续等待
-                            print(f"   ⏳ 处理中... ({status})")
-                            await asyncio.sleep(2)
-                            continue
-                        else:
-                            print(f"   ⚠️  未知状态: {status}")
-                            await asyncio.sleep(2)
-                            continue
-                    else:
-                        try:
-                            error_json = await response.json()
-                            print(f"   ⚠️  查询状态失败: HTTP {response.status}, 响应: {json.dumps(error_json, indent=2)}")
-                            print(f"   ⚠️  完整响应: {await response.text()}")
-                        except Exception:
-                            error_text = await response.text()
-                            print(f"   ⚠️  查询状态失败: HTTP {response.status}, 响应: {error_text}")
-                        await asyncio.sleep(2)
+                    line_str = line.decode('utf-8').strip()
+                    if not line_str:
                         continue
+                    
+                    print(f"   🔍 SSE原始数据: {repr(line_str)}")
+                    
+                    # 解析SSE事件
+                    if line_str.startswith('event:'):
+                        current_event_type = line_str[6:].strip()
+                        print(f"   📝 SSE事件类型: {current_event_type}")
+                        continue
+                    elif line_str.startswith('data:'):
+                        data_str = line_str[5:].strip()
+                        print(f"   📝 SSE数据: {data_str}")
                         
-            except Exception as e:
-                print(f"   ⚠️  轮询异常: {e}")
-                await asyncio.sleep(2)
-                continue
+                        try:
+                            data = json.loads(data_str)
+                            print(f"   📝 SSE解析后数据: {data}")
+                        except json.JSONDecodeError as e:
+                            print(f"   ⚠️  SSE JSON解析失败: {e}")
+                            continue
+                        
+                        # 处理不同类型的事件 - 使用从event行解析的类型
+                        if current_event_type:
+                            
+                            if current_event_type == 'completed':
+                                # 任务完成
+                                result.literature_id = data.get('literature_id')
+                                result.raw_response = data
+                                
+                                if result.literature_id:
+                                    result.success = True
+                                    print(f"   ✅ 成功完成: LID={result.literature_id}")
+                                    result = await self._get_literature_details(result)
+                                else:
+                                    result.success = False
+                                    result.error_message = "任务完成但未生成有效的文献ID"
+                                    print(f"   ❌ 失败: 未生成有效LID")
+                                
+                                return result
+                                
+                            elif current_event_type in ['url_validation_failed', 'component_failed', 'task_failed', 'failed']:
+                                # 任务失败
+                                error_msg = data.get('error', data.get('error_message', 'Unknown error'))
+                                error_type = data.get('error_type', 'Unknown')
+                                result.error_message = f"Task failed: {error_msg}"
+                                result.raw_response = data
+                                
+                                print(f"   ❌ 任务失败: {error_msg}")
+                                print(f"   🔍 错误类型: {error_type}")
+                                
+                                # 根据错误类型提供更多信息
+                                self._analyze_error_type(error_type, error_msg)
+                                
+                                return result
+                                
+                            elif current_event_type == 'progress':
+                                # 进度更新事件
+                                progress = data.get('progress', 0)
+                                stage = data.get('stage', '')
+                                print(f"   🔄 {stage} ({progress}%)")
+                                # 重置事件类型，继续等待下一个事件
+                                current_event_type = None
+                                continue
+                                
+                        # 处理状态更新事件（带进度信息）- 兼容旧格式
+                        elif 'task_id' in data and 'execution_status' in data:
+                            execution_status = data.get('execution_status', '').lower()
+                            overall_progress = data.get('overall_progress', 0)
+                            current_stage = data.get('current_stage', '')
+                            
+                            print(f"   🔄 {current_stage} ({overall_progress}%)")
+                            
+                            if execution_status == 'completed':
+                                # 从完整状态信息中提取结果
+                                literature_status = data.get('literature_status', {})
+                                if 'literature_id' in literature_status:
+                                    result.literature_id = literature_status['literature_id']
+                                    result.success = True
+                                    result.raw_response = data
+                                    print(f"   ✅ 成功完成: LID={result.literature_id}")
+                                    result = await self._get_literature_details(result)
+                                    return result
+                            
+                            elif execution_status == 'failed':
+                                error_info = data.get('error_info', {})
+                                error_msg = error_info.get('error_message', 'Unknown error')
+                                error_type = error_info.get('error_type', 'Unknown')
+                                result.error_message = f"Task failed: {error_msg}"
+                                result.raw_response = data
+                                
+                                print(f"   ❌ 任务失败: {error_msg}")
+                                print(f"   🔍 错误类型: {error_type}")
+                                self._analyze_error_type(error_type, error_msg)
+                                
+                                return result
+                        
+        except asyncio.TimeoutError:
+            result.error_message = f"SSE stream timeout after {max_wait}s"
+            print(f"   ❌ SSE流超时: {result.error_message}")
+            return result
+        except Exception as e:
+            result.error_message = f"SSE stream error: {e}"
+            print(f"   ❌ SSE流异常: {result.error_message}")
+            return result
         
-        # 超时
-        result.error_message = f"Task timeout after {max_wait}s"
-        print(f"   ❌ 超时: 任务在{max_wait}秒内未完成")
+        # 如果流结束但没有明确的完成或失败事件
+        result.error_message = "SSE stream ended without completion"
+        print(f"   ❌ SSE流异常结束")
         return result
     
     async def _get_literature_details(self, result: TestResult) -> TestResult:

@@ -394,7 +394,7 @@ class DatabaseMigrationEnhanced:
             try:
                 await self.collection.create_indexes([index])
                 self.migration_stats["indexes_created"] += 1
-                logger.info(f"✅ Created index: {index.document['name']}")
+                # logger.info(f"✅ Created index: {index.document['name']}")
             except OperationFailure as e:
                 if "already exists" in str(e):
                     logger.info(f"ℹ️ Index {index.document['name']} already exists")

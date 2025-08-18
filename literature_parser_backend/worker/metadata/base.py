@@ -20,6 +20,9 @@ class ProcessorType(Enum):
     FALLBACK = "fallback"          # Last resort fallback
 
 
+# 移除了PaperType枚举，改用简单的必需字段检查
+
+
 @dataclass
 class IdentifierData:
     """Standardized input data for processors."""
@@ -27,6 +30,7 @@ class IdentifierData:
     doi: Optional[str] = None
     arxiv_id: Optional[str] = None
     pmid: Optional[str] = None
+    semantic_scholar_id: Optional[str] = None
     
     # URL-based identifiers
     url: Optional[str] = None
@@ -41,6 +45,7 @@ class IdentifierData:
     # Additional context
     source_data: Optional[Dict[str, Any]] = None
     pdf_content: Optional[bytes] = None
+    file_path: Optional[str] = None  # Local file path
 
 
 @dataclass
@@ -58,6 +63,72 @@ class ProcessorResult:
     def is_valid(self) -> bool:
         """Check if result contains valid metadata."""
         return self.success and self.metadata is not None
+    
+    def is_complete_parsing(self, completeness_threshold: float = 0.7) -> bool:
+        """
+        判断解析是否足够完整，可以停止后续处理器的尝试。
+        
+        Args:
+            completeness_threshold: 完整性阈值，默认0.7表示需要70%的关键字段
+            
+        Returns:
+            bool: True表示解析足够完整，可以停止；False表示需要继续尝试其他处理器
+        """
+        if not self.is_valid:
+            return False
+            
+        metadata = self.metadata
+        
+        # 定义字段权重（总和为1.0）
+        field_weights = {
+            'title': 0.25,      # 标题最重要
+            'authors': 0.20,    # 作者信息重要
+            'year': 0.15,       # 年份重要
+            'abstract': 0.15,   # 摘要重要
+            'journal': 0.15,    # 期刊/会议重要
+            'doi': 0.10         # DOI有用但不是必须的
+        }
+        
+        # 计算当前完整性得分
+        completeness_score = 0.0
+        
+        # 检查标题
+        if metadata.title and metadata.title.strip() and metadata.title != "Unknown Title":
+            completeness_score += field_weights['title']
+            
+        # 检查作者
+        if metadata.authors and len(metadata.authors) > 0:
+            # 检查是否有有效的作者名
+            valid_authors = [a for a in metadata.authors if a.name and a.name.strip()]
+            if valid_authors:
+                completeness_score += field_weights['authors']
+                
+        # 检查年份
+        if metadata.year and str(metadata.year).isdigit():
+            year_int = int(metadata.year)
+            if 1900 <= year_int <= 2030:  # 合理的年份范围
+                completeness_score += field_weights['year']
+                
+        # 检查摘要
+        if metadata.abstract and len(metadata.abstract.strip()) > 50:  # 至少50字符的摘要
+            completeness_score += field_weights['abstract']
+            
+        # 检查期刊/会议
+        if metadata.journal and metadata.journal.strip():
+            completeness_score += field_weights['journal']
+            
+        # 检查DOI
+        if metadata.doi and metadata.doi.strip():
+            completeness_score += field_weights['doi']
+            
+        # 额外的质量检查：如果置信度很高，降低完整性要求
+        adjusted_threshold = completeness_threshold
+        if self.confidence > 0.8:
+            adjusted_threshold = max(0.5, completeness_threshold - 0.2)
+            
+        return completeness_score >= adjusted_threshold
+    
+
 
 
 class MetadataProcessor(ABC):

@@ -64,6 +64,7 @@ async def generic_doi_extraction_func(url: str, context: Dict[str, Any]) -> Opti
                 raise URLAccessFailedException(f"URL无法访问: {fetch_result.error_message}")
             else:
                 # 其他错误类型，继续返回None让上层处理
+                pass
         
         logger.info(f"❌ 通用DOI提取未找到结果")
         return None
