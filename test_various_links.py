@@ -24,27 +24,27 @@ import sys
 
 # 测试用例配置
 TEST_CASES = [
-    # {
-    #     "name": "ArXiv经典论文 - Transformer",
-    #     "url": "https://arxiv.org/abs/1706.03762",
-    #     "expected_processor": "Semantic Scholar",
-    #     "expected_features": ["doi", "arxiv_id", "high_quality"],
-    #     "description": "有ArXiv ID的经典论文，应该优先使用Semantic Scholar"
-    # },
-    # {
-    #     "name": "ArXiv最新论文 - Vision Transformer", 
-    #     "url": "https://arxiv.org/abs/2010.11929",
-    #     "expected_processor": "Semantic Scholar",
-    #     "expected_features": ["arxiv_id"],
-    #     "description": "较新的ArXiv论文测试"
-    # },
-    # {
-    #     "name": "NeurIPS 2012 - AlexNet",
-    #     "url": "https://proceedings.neurips.cc/paper/2012/hash/c399862d3b9d6b76c8436e924a68c45b-Abstract.html",
-    #     "expected_processor": "CrossRef",
-    #     "expected_features": ["title_match", "no_doi"],
-    #     "description": "经典的NeurIPS论文，无DOI，需要标题匹配"
-    # },
+    {
+        "name": "ArXiv经典论文 - Transformer",
+        "url": "https://arxiv.org/abs/1706.03762",
+        "expected_processor": "Semantic Scholar",
+        "expected_features": ["doi", "arxiv_id", "high_quality"],
+        "description": "有ArXiv ID的经典论文，应该优先使用Semantic Scholar"
+    },
+    {
+        "name": "ArXiv最新论文 - Vision Transformer", 
+        "url": "https://arxiv.org/abs/2010.11929",
+        "expected_processor": "Semantic Scholar",
+        "expected_features": ["arxiv_id"],
+        "description": "较新的ArXiv论文测试"
+    },
+    {
+        "name": "NeurIPS 2012 - AlexNet",
+        "url": "https://proceedings.neurips.cc/paper/2012/hash/c399862d3b9d6b76c8436e924a68c45b-Abstract.html",
+        "expected_processor": "CrossRef",
+        "expected_features": ["title_match", "no_doi"],
+        "description": "经典的NeurIPS论文，无DOI，需要标题匹配"
+    },
     {
         "name": "Acceleration of stochastic approximation by averaging",
         "url": "https://doi.org/10.1137/0330046",
@@ -52,34 +52,34 @@ TEST_CASES = [
         "expected_features": ["doi"],
         "description": "经典的NeurIPS论文，有DOI"
     },
-    # {
-    #     "name": "NeurIPS 2017 - Attention论文",
-    #     "url": "https://proceedings.neurips.cc/paper/2017/hash/3f5ee243547dee91fbd053c1c4a845aa-Abstract.html",
-    #     "expected_processor": "CrossRef",
-    #     "expected_features": ["title_match"],
-    #     "description": "另一篇重要的NeurIPS论文"
-    # },
-    # {
-    #     "name": "ACM Digital Library - 有DOI",
-    #     "url": "https://dl.acm.org/doi/10.1145/3292500.3330958",
-    #     "expected_processor": "Semantic Scholar",
-    #     "expected_features": ["doi"],
-    #     "description": "ACM论文，有明确DOI"
-    # },
-    # {
-    #     "name": "IEEE Xplore论文",
-    #     "url": "https://ieeexplore.ieee.org/document/8578335",
-    #     "expected_processor": "Site Parser",
-    #     "expected_features": ["url_parsing"],
-    #     "description": "IEEE论文测试"
-    # },
-    # {
-    #     "name": "ArXiv PDF直链",
-    #     "url": "https://arxiv.org/pdf/1706.03762.pdf",
-    #     "expected_processor": "Semantic Scholar",
-    #     "expected_features": ["arxiv_id"],
-    #     "description": "ArXiv PDF链接应该能提取ArXiv ID"
-    # },
+    {
+        "name": "NeurIPS 2017 - Attention论文",
+        "url": "https://proceedings.neurips.cc/paper/2017/hash/3f5ee243547dee91fbd053c1c4a845aa-Abstract.html",
+        "expected_processor": "CrossRef",
+        "expected_features": ["title_match"],
+        "description": "另一篇重要的NeurIPS论文"
+    },
+    {
+        "name": "ACM Digital Library - 有DOI",
+        "url": "https://dl.acm.org/doi/10.1145/3292500.3330958",
+        "expected_processor": "Semantic Scholar",
+        "expected_features": ["doi"],
+        "description": "ACM论文，有明确DOI"
+    },
+    {
+        "name": "IEEE Xplore论文",
+        "url": "https://ieeexplore.ieee.org/document/8578335",
+        "expected_processor": "Site Parser",
+        "expected_features": ["url_parsing"],
+        "description": "IEEE论文测试"
+    },
+    {
+        "name": "ArXiv PDF直链",
+        "url": "https://arxiv.org/pdf/1706.03762.pdf",
+        "expected_processor": "Semantic Scholar",
+        "expected_features": ["arxiv_id"],
+        "description": "ArXiv PDF链接应该能提取ArXiv ID"
+    },
     {
         "name": "ResNet原论文 - 应该有DOI",
         "url": "https://arxiv.org/abs/1512.03385",
@@ -103,20 +103,20 @@ TEST_CASES = [
         "expected_features": ["doi", "arxiv_id"],
         "description": "BERT论文，NLP领域重要突破"
     },
-    # {
-    #     "name": "GPT-1 原论文",
-    #     "url": "https://s3-us-west-2.amazonaws.com/openai-assets/research-covers/language-unsupervised/language_understanding_paper.pdf",
-    #     "expected_processor": "Site Parser",
-    #     "expected_features": ["pdf_url"],
-    #     "description": "GPT-1原论文，直接PDF链接"
-    # },
-    # {
-    #     "name": "AlphaGo论文 - Nature",
-    #     "url": "https://www.nature.com/articles/nature16961",
-    #     "expected_processor": "Semantic Scholar",
-    #     "expected_features": ["doi"],
-    #     "description": "AlphaGo突破性论文，发表在Nature"
-    # },
+    {
+        "name": "GPT-1 原论文",
+        "url": "https://s3-us-west-2.amazonaws.com/openai-assets/research-covers/language-unsupervised/language_understanding_paper.pdf",
+        "expected_processor": "Site Parser",
+        "expected_features": ["pdf_url"],
+        "description": "GPT-1原论文，直接PDF链接"
+    },
+    {
+        "name": "AlphaGo论文 - Nature",
+        "url": "https://www.nature.com/articles/nature16961",
+        "expected_processor": "Semantic Scholar",
+        "expected_features": ["doi"],
+        "description": "AlphaGo突破性论文，发表在Nature"
+    },
     {
         "name": "GAN论文 - Ian Goodfellow",
         "url": "https://arxiv.org/abs/1406.2661",
@@ -138,13 +138,13 @@ TEST_CASES = [
         "expected_features": ["doi", "arxiv_id"],
         "description": "批标准化论文，深度学习重要技术"
     },
-    # {
-    #     "name": "Dropout论文",
-    #     "url": "https://jmlr.org/papers/v15/srivastava14a.html",
-    #     "expected_processor": "Site Parser",
-    #     "expected_features": ["title_match"],
-    #     "description": "Dropout正则化技术论文"
-    # },
+    {
+        "name": "Dropout论文",
+        "url": "https://jmlr.org/papers/v15/srivastava14a.html",
+        "expected_processor": "Site Parser",
+        "expected_features": ["title_match"],
+        "description": "Dropout正则化技术论文"
+    },
     {
         "name": "Word2Vec - 词向量",
         "url": "https://arxiv.org/abs/1301.3781",
@@ -166,20 +166,20 @@ TEST_CASES = [
         "expected_features": ["arxiv_id"],
         "description": "Adam优化算法论文"
     },
-    # {
-    #     "name": "深度学习Nature综述 - LeCun",
-    #     "url": "https://www.nature.com/articles/nature14539",
-    #     "expected_processor": "Semantic Scholar",
-    #     "expected_features": ["doi"],
-    #     "description": "深度学习Nature综述，LeCun等人"
-    # },
-    # {
-    #     "name": "ImageNet大规模视觉识别",
-    #     "url": "https://www.cv-foundation.org/openaccess/content_cvpr_2015/html/Russakovsky_ImageNet_Large_Scale_2015_CVPR_paper.html",
-    #     "expected_processor": "Site Parser",
-    #     "expected_features": ["title_match"],
-    #     "description": "ImageNet数据集和竞赛的重要论文"
-    # },
+    {
+        "name": "深度学习Nature综述 - LeCun",
+        "url": "https://www.nature.com/articles/nature14539",
+        "expected_processor": "Semantic Scholar",
+        "expected_features": ["doi"],
+        "description": "深度学习Nature综述，LeCun等人"
+    },
+    {
+        "name": "ImageNet大规模视觉识别",
+        "url": "https://www.cv-foundation.org/openaccess/content_cvpr_2015/html/Russakovsky_ImageNet_Large_Scale_2015_CVPR_paper.html",
+        "expected_processor": "Site Parser",
+        "expected_features": ["title_match"],
+        "description": "ImageNet数据集和竞赛的重要论文"
+    },
     {
         "name": "YOLO目标检测",
         "url": "https://arxiv.org/abs/1506.02640",
@@ -194,20 +194,20 @@ TEST_CASES = [
         "expected_features": ["pdf_url"],
         "description": "LSTM原始论文，1997年经典"
     },
-    # {
-    #     "name": "imagenet",
-    #     "url": "https://doi.org/10.1145/3065386",
-    #     "expected_processor": "Semantic Scholar",
-    #     "expected_features": ["doi"],
-    #     "description": "ReLU激活函数的深入研究"
-    # },
-    # {
-    #     "name": "ReLU激活函数研究",
-    #     "url": "https://proceedings.mlr.press/v15/glorot11a.html",
-    #     "expected_processor": "Site Parser",
-    #     "expected_features": ["title_match"],
-    #     "description": "ReLU激活函数的深入研究"
-    # }
+    {
+        "name": "imagenet",
+        "url": "https://doi.org/10.1145/3065386",
+        "expected_processor": "Semantic Scholar",
+        "expected_features": ["doi"],
+        "description": "ReLU激活函数的深入研究"
+    },
+    {
+        "name": "ReLU激活函数研究",
+        "url": "https://proceedings.mlr.press/v15/glorot11a.html",
+        "expected_processor": "Site Parser",
+        "expected_features": ["title_match"],
+        "description": "ReLU激活函数的深入研究"
+    }
 ]
 
 class TestResult:
@@ -305,31 +305,53 @@ class ComprehensiveTester:
                 async with self.session.get(
                     f"{self.base_url}/api/tasks/{task_id}"
                 ) as response:
+                    
                     if response.status == 200:
+                        # print(f"   ⏳ 任务状态: {response.content}")
                         task_status = await response.json()
                         status = task_status.get("status", "").lower()
                         
                         if status == "completed":
+                            # print(f"   ⏳ 任务状态: {task_status}")
                             result_type = task_status.get("result_type")
-                            result.literature_id = task_status.get("lid")
+                            result.literature_id = task_status.get("literature_id")
                             result.raw_response = task_status
-                            result.success = True  # Mark as success regardless of type
-
-                            if result_type == "duplicate":
-                                print(f"   ✅ 成功 (副本): LID={result.literature_id}")
+                            
+                            # 🔧 修复：根据result_type正确判断成功/失败
+                            if result_type == "parsing_failed":
+                                result.success = False
+                                result.error_message = "解析失败 - 无法提取有效的论文信息"
+                                print(f"   ❌ 解析失败: LID={result.literature_id} (占位符)")
+                                print(f"   🔍 详情: 任务完成但无法解析论文内容")
+                            elif not result.literature_id:
+                                result.success = False
+                                result.error_message = "任务完成但未生成有效的文献ID"
+                                print(f"   ❌ 失败: 未生成有效LID")
                             else:
-                                print(f"   ✅ 成功 (创建): LID={result.literature_id}")
+                                result.success = True
+                                if result_type == "duplicate":
+                                    print(f"   ✅ 成功 (副本): LID={result.literature_id}")
+                                else:
+                                    print(f"   ✅ 成功 (创建): LID={result.literature_id}")
 
-                            if result.literature_id:
+                            if result.literature_id and result.success:
                                 result = await self._get_literature_details(result)
                             
                             return result
                             
                         elif status == "failed":
-                            # 任务失败
+                            # 任务失败 - 显示详细错误信息
                             error_msg = task_status.get("error_message", "Unknown error")
+                            error_type = task_status.get("error_type", "Unknown")
                             result.error_message = f"Task failed: {error_msg}"
+                            result.raw_response = task_status
+                            
                             print(f"   ❌ 任务失败: {error_msg}")
+                            print(f"   🔍 错误类型: {error_type}")
+                            
+                            # 根据错误类型提供更多信息
+                            self._analyze_error_type(error_type, error_msg)
+                            
                             return result
                             
                         elif status in ["pending", "processing"]:
@@ -411,6 +433,41 @@ class ComprehensiveTester:
             print(f"   ⚠️  处理器不匹配: 预期{expected_processor}, 实际{result.processor_used}")
         
         return result
+    
+    def _analyze_error_type(self, error_type: str, error_msg: str):
+        """根据错误类型提供详细分析和建议"""
+        if error_type == "HTTPError":
+            print(f"   💡 HTTP错误分析: 可能是URL无效、服务器不可达或权限问题")
+            if "404" in error_msg:
+                print(f"   📝 建议: 检查URL是否正确，文件是否存在")
+            elif "403" in error_msg:
+                print(f"   📝 建议: 可能需要访问权限或反爬虫限制")
+            elif "timeout" in error_msg.lower():
+                print(f"   📝 建议: 网络连接问题，可以稍后重试")
+        
+        elif error_type == "GROBIDConnectionError":
+            print(f"   💡 GROBID服务错误: PDF解析服务不可用")
+            print(f"   📝 建议: 检查GROBID服务状态，可能需要重启服务")
+        
+        elif error_type == "URLValidationError":
+            print(f"   💡 URL格式错误: 输入的链接格式不正确")
+            print(f"   📝 建议: 确保URL以http://或https://开头")
+        
+        elif error_type == "ParseError":
+            print(f"   💡 解析错误: PDF内容无法正确解析")
+            print(f"   📝 建议: 可能是扫描版PDF或格式特殊，尝试其他处理器")
+        
+        elif error_type == "TaskExecutionError":
+            print(f"   💡 任务执行错误: Celery任务执行过程中出现问题")
+            print(f"   📝 建议: 检查任务队列和worker状态")
+        
+        elif error_type == "Unknown":
+            print(f"   💡 未知错误类型: 可能是新的错误类型或系统问题")
+            print(f"   📝 建议: 检查完整错误日志，联系技术支持")
+        
+        else:
+            print(f"   💡 错误类型 '{error_type}': 需要进一步分析")
+            print(f"   📝 建议: 查看详细日志获取更多信息")
     
     def _calculate_quality_score(self, metadata: Dict[str, Any]) -> int:
         """计算元数据质量分数"""
@@ -536,6 +593,11 @@ class ComprehensiveTester:
                 "error_message": result.error_message,
                 "analysis": result.analysis
             }
+            
+            # 添加错误类型信息（如果有的话）
+            if not result.success and result.raw_response:
+                detailed["error_type"] = result.raw_response.get("error_type", "Unknown")
+            
             report["detailed_results"].append(detailed)
         
         return report
@@ -570,6 +632,21 @@ class ComprehensiveTester:
                 print(f"      时间: {result['processing_time']}")
             else:
                 print(f"      错误: {result['error_message']}")
+                if "error_type" in result:
+                    print(f"      类型: {result['error_type']}")
+                    
+        # 添加错误类型统计
+        error_types = {}
+        failed_results = [r for r in report["detailed_results"] if not r["success"]]
+        
+        if failed_results:
+            print(f"\n🔍 错误类型统计:")
+            for result in failed_results:
+                error_type = result.get("error_type", "Unknown")
+                error_types[error_type] = error_types.get(error_type, 0) + 1
+            
+            for error_type, count in error_types.items():
+                print(f"   {error_type}: {count}次")
 
 async def main():
     """主函数"""

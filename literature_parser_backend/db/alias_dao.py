@@ -51,6 +51,12 @@ class AliasDAO(BaseNeo4jDAO):
             for alias_type, alias_value in aliases.items():
                 lid = await self._lookup_single_alias(alias_type, alias_value)
                 if lid:
+                    # 🔧 修复：检查已存在文献的质量
+                    quality_ok = await self._check_literature_quality(lid)
+                    if not quality_ok:
+                        logger.info(f"发现低质量文献 LID={lid}，允许重新解析")
+                        continue  # 跳过这个低质量的文献，继续查找其他alias
+                    
                     logger.info(f"Alias resolved: {alias_type}={alias_value} -> LID={lid}")
                     return lid
             
@@ -95,6 +101,46 @@ class AliasDAO(BaseNeo4jDAO):
         except Exception as e:
             logger.error(f"Error looking up alias {alias_type}={alias_value}: {e}")
             return None
+    
+    async def _check_literature_quality(self, lid: str) -> bool:
+        """
+        检查文献质量，判断是否应该重新解析
+        
+        :param lid: 文献ID
+        :return: True表示质量可接受，False表示需要重新解析
+        """
+        try:
+            # 导入LiteratureDAO来查询文献
+            from .literature_dao import LiteratureDAO
+            
+            dao = LiteratureDAO()
+            literature = await dao.find_by_lid(lid)
+            
+            if not literature or not literature.metadata:
+                logger.info(f"文献 {lid} 无元数据，允许重新解析")
+                return False
+            
+            # 使用已有的质量评估函数
+            from literature_parser_backend.worker.tasks import _evaluate_metadata_quality
+            quality_check = _evaluate_metadata_quality(literature.metadata, "existing")
+            
+            # 如果质量分数低于40分，认为需要重新解析
+            if quality_check.get('quality_score', 0) < 40:
+                logger.info(f"文献 {lid} 质量过低 (分数: {quality_check.get('quality_score', 0)}/100)，允许重新解析")
+                return False
+            
+            # 如果是解析失败的文献，允许重新解析
+            if quality_check.get('is_parsing_failed', False):
+                logger.info(f"文献 {lid} 解析失败，允许重新解析")
+                return False
+            
+            logger.info(f"文献 {lid} 质量良好 (分数: {quality_check.get('quality_score', 0)}/100)，保持现有记录")
+            return True
+            
+        except Exception as e:
+            logger.error(f"检查文献质量时出错 {lid}: {e}", exc_info=True)
+            # 如果检查失败，默认允许重新解析
+            return False
     
     async def create_mapping(
         self,

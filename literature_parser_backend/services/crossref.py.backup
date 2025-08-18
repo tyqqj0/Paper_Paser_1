@@ -82,8 +82,7 @@ class CrossRefClient:
 
             if response.status_code == 200:
                 data = response.json()
-                # 🆕 直接返回原始CrossRef数据，不做转换
-                return data.get("message", {})
+                return self._parse_crossref_work(data.get("message", {}))
             elif response.status_code == 404:
                 logger.info(f"DOI {doi} not found in CrossRef")
                 return None
@@ -146,8 +145,11 @@ class CrossRefClient:
             data = response.json()
             items = data.get("message", {}).get("items", [])
 
-            # 🆕 直接返回原始CrossRef数据列表，不做转换
-            results = items
+            results = []
+            for item in items:
+                parsed_item = self._parse_crossref_work(item)
+                if parsed_item:
+                    results.append(parsed_item)
 
             return results
 
@@ -183,10 +185,7 @@ class CrossRefClient:
 
     def _parse_crossref_work(self, work_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        🚫 DEPRECATED: Parse CrossRef work data into our standard format.
-        
-        📝 NOTE: 数据转换逻辑已迁移到 CrossRefProcessor._convert_crossref_to_metadata()
-        此方法保留仅为兼容性，建议使用处理器层的统一转换。
+        Parse CrossRef work data into our standard format.
 
         Args:
             work_data: Raw work data from CrossRef API

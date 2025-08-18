@@ -259,6 +259,21 @@ class DataPipeline:
             if identifiers.get('doi'):
                 existing = await self.dao.find_by_doi(identifiers['doi'])
                 if existing:
+                    # 🔧 修复：检查已存在文献的质量
+                    if existing.metadata:
+                        from ...worker.tasks import _evaluate_metadata_quality
+                        quality_check = _evaluate_metadata_quality(existing.metadata, "existing")
+                        
+                        # 🛡️ 如果已存在文献质量很低，不应该返回重复
+                        if quality_check.get('quality_score', 0) < 40:
+                            logger.info(f"📋 [数据管道] 发现低质量重复文献 (分数: {quality_check.get('quality_score', 0)}/100)，允许重新解析")
+                            return {'is_duplicate': False}
+                        
+                        # 🛡️ 如果是解析失败的文献，不应该返回重复
+                        if quality_check.get('is_parsing_failed', False):
+                            logger.info(f"📋 [数据管道] 发现解析失败的重复文献，允许重新解析")
+                            return {'is_duplicate': False}
+                    
                     return {
                         'is_duplicate': True,
                         'existing_lid': existing.lid,
@@ -269,6 +284,21 @@ class DataPipeline:
             if identifiers.get('arxiv_id'):
                 existing = await self.dao.find_by_arxiv_id(identifiers['arxiv_id'])
                 if existing:
+                    # 🔧 修复：检查已存在文献的质量
+                    if existing.metadata:
+                        from ...worker.tasks import _evaluate_metadata_quality
+                        quality_check = _evaluate_metadata_quality(existing.metadata, "existing")
+                        
+                        # 🛡️ 如果已存在文献质量很低，不应该返回重复
+                        if quality_check.get('quality_score', 0) < 40:
+                            logger.info(f"📋 [数据管道] 发现低质量ArXiv重复文献 (分数: {quality_check.get('quality_score', 0)}/100)，允许重新解析")
+                            return {'is_duplicate': False}
+                        
+                        # 🛡️ 如果是解析失败的文献，不应该返回重复
+                        if quality_check.get('is_parsing_failed', False):
+                            logger.info(f"📋 [数据管道] 发现解析失败的ArXiv重复文献，允许重新解析")
+                            return {'is_duplicate': False}
+                    
                     return {
                         'is_duplicate': True,
                         'existing_lid': existing.lid,

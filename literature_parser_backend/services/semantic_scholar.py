@@ -306,7 +306,6 @@ class SemanticScholarClient:
             "publicationTypes": paper_data.get("publicationTypes"),
             "publicationDate": paper_data.get("publicationDate"),
             "journal": paper_data.get("journal"),
-            "authors": self._parse_authors(paper_data.get("authors", [])),
             "externalIds": paper_data.get("externalIds"),
             "url": paper_data.get("url"),
             "publicationVenue": paper_data.get("publicationVenue"),

@@ -243,83 +243,83 @@ class CrossRefProcessor(MetadataProcessor):
                 source=self.name
             )
 
-    async def _process_by_title(
-        self, 
-        title: str, 
-        year: Optional[int] = None
-    ) -> ProcessorResult:
-        """
-        通过标题搜索CrossRef元数据。
+    # async def _process_by_title(
+    #     self, 
+    #     title: str, 
+    #     year: Optional[int] = None
+    # ) -> ProcessorResult:
+    #     """
+    #     通过标题搜索CrossRef元数据。
         
-        使用直接API调用 + 简化的过滤逻辑。
+    #     使用直接API调用 + 简化的过滤逻辑。
         
-        Args:
-            title: 论文标题
-            year: 可选的发表年份
+    #     Args:
+    #         title: 论文标题
+    #         year: 可选的发表年份
             
-        Returns:
-            ProcessorResult with 搜索结果
-        """
-        try:
-            # 1. 使用直接API进行宽松搜索
-            candidates = await self._search_crossref_by_title_direct(title, limit=10)
+    #     Returns:
+    #         ProcessorResult with 搜索结果
+    #     """
+    #     try:
+    #         # 1. 使用直接API进行宽松搜索
+    #         candidates = await self._search_crossref_by_title_direct(title, limit=10)
             
-            if not candidates:
-                return ProcessorResult(
-                    success=False,
-                    error="CrossRef: No search results found",
-                    source=self.name
-                )
+    #         if not candidates:
+    #             return ProcessorResult(
+    #                 success=False,
+    #                 error="CrossRef: No search results found",
+    #                 source=self.name
+    #             )
             
-            logger.info(f"🔍 CrossRef返回{len(candidates)}个候选结果")
+    #         logger.info(f"🔍 CrossRef返回{len(candidates)}个候选结果")
             
-            # 2. 使用统一标题匹配工具进行精确过滤
-            filtered_results = TitleMatchingUtils.filter_crossref_candidates(
-                target_title=title,
-                candidates=candidates,
-                mode=MatchingMode.STRICT  # 🆕 使用精确模式，避免错误匹配
-            )
+    #         # 2. 使用统一标题匹配工具进行精确过滤
+    #         filtered_results = TitleMatchingUtils.filter_crossref_candidates(
+    #             target_title=title,
+    #             candidates=candidates,
+    #             mode=MatchingMode.STRICT  # 🆕 使用精确模式，避免错误匹配
+    #         )
             
-            if not filtered_results:
-                return ProcessorResult(
-                    success=False,
-                    error="CrossRef: No results passed similarity filter",
-                    source=self.name
-                )
+    #         if not filtered_results:
+    #             return ProcessorResult(
+    #                 success=False,
+    #                 error="CrossRef: No results passed similarity filter",
+    #                 source=self.name
+    #             )
             
-            # 3. 选择最佳匹配（优先考虑年份）
-            best_candidate, similarity_score = self._select_best_candidate(
-                filtered_results, target_year=year
-            )
+    #         # 3. 选择最佳匹配（优先考虑年份）
+    #         best_candidate, similarity_score = self._select_best_candidate(
+    #             filtered_results, target_year=year
+    #         )
             
-            logger.info(f"✅ 选择最佳匹配: 相似度={similarity_score:.3f}")
+    #         logger.info(f"✅ 选择最佳匹配: 相似度={similarity_score:.3f}")
             
-            # 4. 转换为标准元数据格式
-            metadata = self._convert_crossref_to_metadata(best_candidate)
+    #         # 4. 转换为标准元数据格式
+    #         metadata = self._convert_crossref_to_metadata(best_candidate)
 
-            # 提取DOI
-            new_doi = best_candidate.get("DOI")
-            new_identifiers = {"doi": new_doi} if new_doi else None
+    #         # 提取DOI
+    #         new_doi = best_candidate.get("DOI")
+    #         new_identifiers = {"doi": new_doi} if new_doi else None
             
-            # 5. 调整置信度（基于相似度）
-            confidence = min(0.9, similarity_score * 0.9)  # 最高0.9，基于相似度调整
+    #         # 5. 调整置信度（基于相似度）
+    #         confidence = min(0.9, similarity_score * 0.9)  # 最高0.9，基于相似度调整
             
-            return ProcessorResult(
-                success=True,
-                metadata=metadata,
-                raw_data=best_candidate,
-                confidence=confidence,
-                source=self.name,
-                new_identifiers=new_identifiers  # 传递新发现的DOI
-            )
+    #         return ProcessorResult(
+    #             success=True,
+    #             metadata=metadata,
+    #             raw_data=best_candidate,
+    #             confidence=confidence,
+    #             source=self.name,
+    #             new_identifiers=new_identifiers  # 传递新发现的DOI
+    #         )
             
-        except Exception as e:
-            logger.error(f"CrossRef标题搜索失败: {e}")
-            return ProcessorResult(
-                success=False,
-                error=f"CrossRef标题搜索失败: {str(e)}",
-                source=self.name
-            )
+    #     except Exception as e:
+    #         logger.error(f"CrossRef标题搜索失败: {e}")
+    #         return ProcessorResult(
+    #             success=False,
+    #             error=f"CrossRef标题搜索失败: {str(e)}",
+    #             source=self.name
+    #         )
     
     async def _search_crossref_precise(
         self, 
