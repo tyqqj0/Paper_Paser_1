@@ -125,12 +125,18 @@ class ArXivProcessor(MetadataProcessor):
             confidence = 0.85  # 直接使用ArXiv数据置信度较高
             logger.info("✅ ArXiv数据作为主要metadata来源")
         
+        # 提取新的标识符
+        new_identifiers = {}
+        if arxiv_data.get('arxiv_id'):
+            new_identifiers['arxiv_id'] = arxiv_data['arxiv_id']
+            
         return ProcessorResult(
             success=True,
             metadata=enhanced_metadata,
             raw_data=arxiv_data,
             confidence=confidence,
-            source=self.name
+            source=self.name,
+            new_identifiers=new_identifiers
         )
     
     async def _process_by_title(self, identifiers: IdentifierData) -> ProcessorResult:
@@ -171,12 +177,18 @@ class ArXivProcessor(MetadataProcessor):
         # 调整置信度（基于相似度）
         confidence = min(0.8, similarity_score * 0.7)  # 搜索模式置信度稍低
         
+        # 提取新的标识符
+        new_identifiers = {}
+        if best_match.get('arxiv_id'):
+            new_identifiers['arxiv_id'] = best_match['arxiv_id']
+            
         return ProcessorResult(
             success=True,
             metadata=arxiv_metadata,
             raw_data=best_match,
             confidence=confidence,
-            source=self.name
+            source=self.name,
+            new_identifiers=new_identifiers
         )
     
     def _extract_existing_metadata(self, identifiers: IdentifierData) -> Optional[MetadataModel]:

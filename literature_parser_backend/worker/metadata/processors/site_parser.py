@@ -218,6 +218,10 @@ class SiteParserProcessor(MetadataProcessor):
                     
                 logger.info(f"[SiteParserV2] Meta标签增强完成，作者: {len(authors)}个")
 
+            # 🆕 提取DOI和其他标识符
+            extracted_identifiers = self._extract_identifiers(soup, identifiers.url)
+            logger.info(f"[SiteParserV2] 标识符提取结果: {extracted_identifiers}")
+
             metadata = MetadataModel(
                 title=title,
                 authors=authors,
@@ -239,7 +243,8 @@ class SiteParserProcessor(MetadataProcessor):
                 metadata=metadata,
                 raw_data={'source_url': identifiers.url},
                 confidence=confidence,
-                source=self.name
+                source=self.name,
+                new_identifiers=extracted_identifiers  # 🆕 返回提取到的标识符
             )
             
         except Exception as e:
@@ -296,6 +301,75 @@ class SiteParserProcessor(MetadataProcessor):
             logger.warning(f"[SiteParserV2] Meta标签提取异常: {url}, 错误: {e}")
         
         return title, authors, abstract, year, venue
+
+    def _extract_identifiers(self, soup, url: str) -> Dict[str, str]:
+        """从页面中提取DOI和其他标识符"""
+        identifiers = {}
+        
+        try:
+            # 1. 尝试从meta标签提取DOI
+            doi_meta = soup.find('meta', {'name': 'citation_doi'})
+            if doi_meta:
+                doi = doi_meta.get('content', '').strip()
+                if doi:
+                    identifiers['doi'] = doi
+                    logger.debug(f"[SiteParserV2] 从meta标签提取DOI: {doi}")
+            
+            # 2. 尝试从页面链接提取DOI
+            if 'doi' not in identifiers:
+                doi_links = soup.find_all('a', href=re.compile(r'doi\.org', re.IGNORECASE))
+                for link in doi_links:
+                    href = link.get('href', '')
+                    doi_match = re.search(r'doi\.org/(10\.\d{4,}/[^\s"\'<>]+)', href)
+                    if doi_match:
+                        identifiers['doi'] = doi_match.group(1)
+                        logger.debug(f"[SiteParserV2] 从链接提取DOI: {identifiers['doi']}")
+                        break
+            
+            # 3. 尝试从页面内容直接匹配DOI
+            if 'doi' not in identifiers:
+                page_text = soup.get_text()
+                doi_pattern = r'\b10\.\d{4,}/[A-Za-z0-9\.\-_/]+\b'
+                doi_matches = re.findall(doi_pattern, page_text)
+                if doi_matches:
+                    # 取第一个看起来合理的DOI
+                    for doi in doi_matches:
+                        if len(doi) > 10:  # DOI通常比较长
+                            identifiers['doi'] = doi
+                            logger.debug(f"[SiteParserV2] 从页面内容提取DOI: {doi}")
+                            break
+            
+            # 4. 尝试提取ArXiv ID
+            arxiv_meta = soup.find('meta', {'name': 'citation_arxiv_id'})
+            if arxiv_meta:
+                arxiv_id = arxiv_meta.get('content', '').strip()
+                if arxiv_id:
+                    identifiers['arxiv_id'] = arxiv_id
+                    logger.debug(f"[SiteParserV2] 从meta标签提取ArXiv ID: {arxiv_id}")
+            
+            # 5. 从URL或链接中查找ArXiv ID
+            if 'arxiv_id' not in identifiers:
+                arxiv_links = soup.find_all('a', href=re.compile(r'arxiv\.org', re.IGNORECASE))
+                for link in arxiv_links:
+                    href = link.get('href', '')
+                    arxiv_match = re.search(r'arxiv\.org/(?:abs|pdf)/([^/?]+)', href, re.IGNORECASE)
+                    if arxiv_match:
+                        identifiers['arxiv_id'] = arxiv_match.group(1)
+                        logger.debug(f"[SiteParserV2] 从链接提取ArXiv ID: {identifiers['arxiv_id']}")
+                        break
+            
+            # 6. 提取PMID（如果适用）
+            pmid_meta = soup.find('meta', {'name': 'citation_pmid'})
+            if pmid_meta:
+                pmid = pmid_meta.get('content', '').strip()
+                if pmid:
+                    identifiers['pmid'] = pmid
+                    logger.debug(f"[SiteParserV2] 从meta标签提取PMID: {pmid}")
+            
+        except Exception as e:
+            logger.warning(f"[SiteParserV2] 标识符提取异常: {url}, 错误: {e}")
+        
+        return identifiers
 
     def _calculate_confidence(self, metadata: MetadataModel) -> float:
         confidence = 0.0

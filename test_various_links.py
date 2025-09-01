@@ -24,13 +24,13 @@ import sys
 
 # 测试用例配置
 TEST_CASES = [
-    # {
-    #     "name": "ArXiv经典论文 - Transformer",
-    #     "url": "https://arxiv.org/abs/1706.03762",
-    #     "expected_processor": "Semantic Scholar",
-    #     "expected_features": ["doi", "arxiv_id", "high_quality"],
-    #     "description": "有ArXiv ID的经典论文，应该优先使用Semantic Scholar"
-    # },
+    {
+        "name": "ArXiv经典论文 - Transformer",
+        "url": "https://arxiv.org/abs/1706.03762",
+        "expected_processor": "Semantic Scholar",
+        "expected_features": ["doi", "arxiv_id", "high_quality"],
+        "description": "有ArXiv ID的经典论文，应该优先使用Semantic Scholar"
+    },
     # {
     #     "name": "ArXiv最新论文 - Vision Transformer", 
     #     "url": "https://arxiv.org/abs/2010.11929",
@@ -208,13 +208,13 @@ TEST_CASES = [
     #     "expected_features": ["doi"],
     #     "description": "ReLU激活函数的深入研究"
     # },
-    {
-        "name": "ReLU激活函数研究",
-        "url": "https://proceedings.mlr.press/v15/glorot11a.html",
-        "expected_processor": "Site Parser",
-        "expected_features": ["title_match"],
-        "description": "ReLU激活函数的深入研究"
-    }
+    # {
+    #     "name": "ReLU激活函数研究",
+    #     "url": "https://proceedings.mlr.press/v15/glorot11a.html",
+    #     "expected_processor": "Site Parser",
+    #     "expected_features": ["title_match"],
+    #     "description": "ReLU激活函数的深入研究"
+    # }
 ]
 
 class TestResult:

@@ -18,7 +18,7 @@ from literature_parser_backend.worker.celery_app import celery_app
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 
@@ -29,7 +29,7 @@ def main() -> None:
     celery_app.worker_main(
         [
             "worker",
-            "--loglevel=info",
+            "--loglevel=debug",
             "--concurrency=1",  # Single process for literature processing
             "--queues=literature",  # Only process literature queue
             "--hostname=literature-worker@%h",

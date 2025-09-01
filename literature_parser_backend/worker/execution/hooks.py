@@ -102,7 +102,7 @@ class DeduplicationHook(Hook):
         
         # 基于标题+作者查重 (简化版)
         if metadata.title and metadata.authors:
-            title_matches = await self.dao.find_by_fuzzy_title(metadata.title, threshold=0.9)
+            title_matches = await self.dao.find_by_title_fuzzy(metadata.title, threshold=0.9)
             for match in title_matches:
                 if match.lid != current_id and match.lid not in duplicates:
                     # 简单的作者匹配检查
@@ -393,7 +393,7 @@ class HookManager:
             AliasCreationHook(self.dao),
             QualityAssessmentHook(self.dao),
             # 🆕 新增关系数据处理Hook
-            ReferencesFetchHook(self.dao),
+            # ReferencesFetchHook(self.dao),
             CitationResolverHook(self.dao),
             UnresolvedNodeUpgradeHook(self.dao)
         ]
@@ -493,111 +493,111 @@ class HookManager:
 
 # =================== 🆕 新增关系数据处理Hook ===================
 
-class ReferencesFetchHook(Hook):
-    """引用文献获取Hook"""
+# class ReferencesFetchHook(Hook):
+#     """引用文献获取Hook    未启用"""
     
-    @property
-    def name(self) -> str:
-        return "references_fetch"
+#     @property
+#     def name(self) -> str:
+#         return "references_fetch"
     
-    @property
-    def triggers(self) -> List[str]:
-        return ["metadata_updated"]
+#     @property
+#     def triggers(self) -> List[str]:
+#         return ["metadata_updated"]
     
-    def __init__(self, dao: LiteratureDAO):
-        super().__init__()
-        self.dao = dao
+#     def __init__(self, dao: LiteratureDAO):
+#         super().__init__()
+#         self.dao = dao
     
-    async def execute(self, event: str, context: Dict[str, Any]) -> Dict[str, Any]:
-        """获取引用文献"""
-        try:
-            literature_id = context.get('literature_id')
-            metadata = context.get('metadata')
+#     async def execute(self, event: str, context: Dict[str, Any]) -> Dict[str, Any]:
+#         """获取引用文献"""
+#         try:
+#             literature_id = context.get('literature_id')
+#             metadata = context.get('metadata')
             
-            if not literature_id or not metadata:
-                return {'status': 'skipped', 'reason': 'Missing literature_id or metadata'}
+#             if not literature_id or not metadata:
+#                 return {'status': 'skipped', 'reason': 'Missing literature_id or metadata'}
             
-            logger.info(f"📚 [Hook] 开始获取引用文献: {literature_id}")
+#             logger.info(f"📚 [Hook] 开始获取引用文献: {literature_id}")
             
-            # 🎯 使用原有的ReferencesFetcher逻辑
-            try:
-                from ..references_fetcher import ReferencesFetcher
-                from ...settings import Settings
+#             # 🎯 使用原有的ReferencesFetcher逻辑
+#             try:
+#                 from ..references_fetcher import ReferencesFetcher
+#                 from ...settings import Settings
                 
-                settings = Settings()
-                references_fetcher = ReferencesFetcher(settings)
+#                 settings = Settings()
+#                 references_fetcher = ReferencesFetcher(settings)
                 
-                # 构建标识符字典
-                identifiers = {}
-                if metadata:
-                    if hasattr(metadata, 'identifiers') and metadata.identifiers:
-                        if hasattr(metadata.identifiers, 'doi') and metadata.identifiers.doi:
-                            identifiers['doi'] = metadata.identifiers.doi
-                        if hasattr(metadata.identifiers, 'arxiv_id') and metadata.identifiers.arxiv_id:
-                            identifiers['arxiv_id'] = metadata.identifiers.arxiv_id
+#                 # 构建标识符字典
+#                 identifiers = {}
+#                 if metadata:
+#                     if hasattr(metadata, 'identifiers') and metadata.identifiers:
+#                         if hasattr(metadata.identifiers, 'doi') and metadata.identifiers.doi:
+#                             identifiers['doi'] = metadata.identifiers.doi
+#                         if hasattr(metadata.identifiers, 'arxiv_id') and metadata.identifiers.arxiv_id:
+#                             identifiers['arxiv_id'] = metadata.identifiers.arxiv_id
                 
-                logger.info(f"📚 [Hook] 使用标识符获取引用: {identifiers}")
+#                 logger.info(f"📚 [Hook] 使用标识符获取引用: {identifiers}")
                 
-                # 使用瀑布流方法获取引用
-                if identifiers:
-                    references, raw_data = references_fetcher.fetch_references_waterfall(
-                        identifiers=identifiers,
-                        pdf_content=None  # 暂时不传入PDF内容
-                    )
+#                 # 使用瀑布流方法获取引用
+#                 if identifiers:
+#                     references, raw_data = references_fetcher.fetch_references_waterfall(
+#                         identifiers=identifiers,
+#                         pdf_content=None  # 暂时不传入PDF内容
+#                     )
                     
-                    if references:
-                        # 更新文献的引用信息（如果DAO支持此方法）
-                        try:
-                            if hasattr(self.dao, 'update_literature_references'):
-                                await self.dao.update_literature_references(literature_id, references)
-                        except Exception as e:
-                            logger.warning(f"更新文献引用失败: {e}")
+#                     if references:
+#                         # 更新文献的引用信息（如果DAO支持此方法）
+#                         try:
+#                             if hasattr(self.dao, 'update_literature_references'):
+#                                 await self.dao.update_literature_references(literature_id, references)
+#                         except Exception as e:
+#                             logger.warning(f"更新文献引用失败: {e}")
                         
-                        # 🎯 触发引用获取完成事件
-                        # 将引用数据添加到上下文中，供CitationResolverHook使用
-                        context.update({
-                            'references': references,
-                            'raw_references_data': raw_data,
-                            'source_identifiers': identifiers
-                        })
+#                         # 🎯 触发引用获取完成事件
+#                         # 将引用数据添加到上下文中，供CitationResolverHook使用
+#                         context.update({
+#                             'references': references,
+#                             'raw_references_data': raw_data,
+#                             'source_identifiers': identifiers
+#                         })
                         
-                        logger.info(f"✅ [Hook] 引用获取完成: {len(references)} 个引用")
+#                         logger.info(f"✅ [Hook] 引用获取完成: {len(references)} 个引用")
                         
-                        # 🔄 手动触发级联事件
-                        if hasattr(self, 'hook_manager') and self.hook_manager:
-                            try:
-                                await self.hook_manager.trigger_event('references_fetched', context)
-                                logger.info(f"🔄 [Hook] 已触发 references_fetched 事件")
-                            except Exception as e:
-                                logger.warning(f"触发级联事件失败: {e}")
+#                         # 🔄 手动触发级联事件
+#                         if hasattr(self, 'hook_manager') and self.hook_manager:
+#                             try:
+#                                 await self.hook_manager.trigger_event('references_fetched', context)
+#                                 logger.info(f"🔄 [Hook] 已触发 references_fetched 事件")
+#                             except Exception as e:
+#                                 logger.warning(f"触发级联事件失败: {e}")
                         
-                        return {
-                            'status': 'completed',
-                            'references_count': len(references),
-                            'identifiers_used': identifiers,
-                            'cascade_triggered': True
-                        }
-                    else:
-                        logger.warning(f"⚠️ [Hook] 未能获取到引用文献")
-                        return {
-                            'status': 'completed',
-                            'references_count': 0,
-                            'reason': 'No references found from sources'
-                        }
-                else:
-                    logger.warning(f"⚠️ [Hook] 没有可用的标识符获取引用")
-                    return {
-                        'status': 'skipped',
-                        'reason': 'No valid identifiers (DOI/ArXiv) available'
-                    }
+#                         return {
+#                             'status': 'completed',
+#                             'references_count': len(references),
+#                             'identifiers_used': identifiers,
+#                             'cascade_triggered': True
+#                         }
+#                     else:
+#                         logger.warning(f"⚠️ [Hook] 使用理想标识符未能获取到引用文献")
+#                         return {
+#                             'status': 'completed',
+#                             'references_count': 0,
+#                             'reason': 'No references found from sources with ideal identifiers'
+#                         }
+#                 else:
+#                     logger.warning(f"⚠️ [Hook] 没有可用的标识符获取引用")
+#                     return {
+#                         'status': 'skipped',
+#                         'reason': 'No valid identifiers (DOI/ArXiv) available'
+#                     }
                     
-            except ImportError:
-                logger.error(f"❌ [Hook] 无法导入ReferencesFetcher")
-                return {'status': 'failed', 'error': 'ReferencesFetcher not available'}
+#             except ImportError:
+#                 logger.error(f"❌ [Hook] 无法导入ReferencesFetcher")
+#                 return {'status': 'failed', 'error': 'ReferencesFetcher not available'}
                 
-        except Exception as e:
-            logger.error(f"❌ [Hook] 引用获取失败: {e}")
-            return {'status': 'failed', 'error': str(e)}
+#         except Exception as e:
+#             logger.error(f"❌ [Hook] 引用获取失败: {e}")
+#             return {'status': 'failed', 'error': str(e)}
 
 
 class CitationResolverHook(Hook):

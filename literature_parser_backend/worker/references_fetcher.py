@@ -34,15 +34,22 @@ class ReferencesFetcher:
     ) -> Tuple[List[ReferenceModel], Dict[str, Any]]:
         """
         Fetch references using waterfall: Semantic Scholar -> CrossRef -> GROBID fallback.
+        
+        🆕 支持可选DOI策略：即使没有DOI/ArXiv ID也会尝试其他方法获取引用
         """
         logger.info(f"Starting references fetch for identifiers: {identifiers}")
 
         references: List[ReferenceModel] = []
         raw_data: Dict[str, Any] = {}
 
-        # 1. Try Semantic Scholar API
+        # 🆕 可选DOI策略：检查是否有理想标识符
         identifier = identifiers.get("doi") or identifiers.get("arxiv_id")
-        if identifier:
+        has_ideal_identifiers = bool(identifier)
+        
+        logger.info(f"📋 标识符分析: DOI={identifiers.get('doi')}, ArXiv={identifiers.get('arxiv_id')}, 有理想标识符={has_ideal_identifiers}")
+
+        # 1. Try Semantic Scholar API (仅当有理想标识符时)
+        if has_ideal_identifiers:
             logger.info(
                 "Attempting to fetch references from Semantic Scholar for "
                 f"identifier: {identifier}",
@@ -169,6 +176,23 @@ class ReferencesFetcher:
                     )
             except Exception as e:
                 logger.error(f"GROBID reference parsing failed: {e}", exc_info=True)
+
+        # 🆕 可选DOI策略：如果没有理想标识符，记录并优雅返回
+        if not has_ideal_identifiers:
+            logger.info(f"📋 可选DOI策略: 没有理想标识符(DOI/ArXiv)，但引用获取流程正常完成")
+            raw_data["strategy"] = "optional_doi_strategy"
+            raw_data["no_ideal_identifiers"] = True
+            raw_data["attempted_methods"] = ["grobid_fallback"] if pdf_content else ["none_available"]
+            
+        # 🎯 添加统计信息
+        raw_data["source"] = "references_fetcher"
+        raw_data["references_count"] = len(references)
+        raw_data["has_ideal_identifiers"] = has_ideal_identifiers
+        
+        if references:
+            logger.info(f"✅ 引用获取成功: {len(references)} 个引用")
+        else:
+            logger.info(f"📋 引用获取完成: 0 个引用（可选DOI策略 - 非错误状态）")
 
         return references, raw_data
 

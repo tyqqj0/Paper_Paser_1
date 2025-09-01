@@ -146,13 +146,20 @@ class DataPipeline:
         
         # 元数据质量检查
         metadata = raw_data.get('metadata')
-        if not metadata:
+        
+        # 🔍 调试：输出raw_data的详细信息
+        logger.debug(f"[数据管道] raw_data的keys: {list(raw_data.keys()) if raw_data else 'None'}")
+        if metadata:
+            logger.debug(f"[数据管道] metadata类型: {type(metadata)}")
+            logger.debug(f"[数据管道] metadata内容: {metadata}")
+        else:
             logger.warning(f"[数据管道] 没有元数据")
             return False, "parsing_failed"
         
         # 检查标题 - MetadataModel对象应该有title属性
         try:
             title = getattr(metadata, 'title', None)
+            logger.debug(f"[数据管道] 从metadata获取到的title: '{title}'")
             if not title or title in ['Unknown Title', 'Processing...']:
                 logger.warning(f"[数据管道] 标题无效: {title}")
                 return False, "parsing_failed"
@@ -222,17 +229,30 @@ class DataPipeline:
             raise ValueError("raw_data cannot be None")
         
         metadata = raw_data.get('metadata')
-        new_identifiers = raw_data.get('new_identifiers') or {}
+        new_identifiers = raw_data.get('new_identifiers') or []
         
         # 🔧 确保source_data和mapping_result不为None
         source_data = source_data or {}
         mapping_result = mapping_result or {}
         
+        # 🔧 处理new_identifiers - 可能是list或dict
+        identifiers_dict = {}
+        if isinstance(new_identifiers, list):
+            # 如果是list格式，转换为dict
+            for item in new_identifiers:
+                if isinstance(item, dict):
+                    # 智能路由累积格式: {'arxiv_id': '1706.03762', 'discovered_by': 'ArXiv Official API'}
+                    for key, value in item.items():
+                        if key not in ['discovered_by', 'confidence', 'source_processor']:
+                            identifiers_dict[key] = value
+        elif isinstance(new_identifiers, dict):
+            identifiers_dict = new_identifiers
+        
         # 构建标识符
         identifiers = {
-            'doi': source_data.get('doi') or new_identifiers.get('doi'),
-            'arxiv_id': source_data.get('arxiv_id') or new_identifiers.get('arxiv_id'),
-            'pmid': source_data.get('pmid') or new_identifiers.get('pmid'),
+            'doi': source_data.get('doi') or identifiers_dict.get('doi'),
+            'arxiv_id': source_data.get('arxiv_id') or identifiers_dict.get('arxiv_id'),
+            'pmid': source_data.get('pmid') or identifiers_dict.get('pmid'),
             'url': source_data.get('url')
         }
         
