@@ -16,39 +16,25 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/graphs", tags=["关系图"])
 
 
-@router.get("", summary="Get literature relationship graph")
+@router.get("", summary="Get internal literature relationship graph")
 async def get_literature_graph(
     lids: str = Query(
         ...,
-        description="Comma-separated list of LIDs to analyze relationships for",
+        description="Comma-separated list of LIDs to analyze internal relationships for",
         example="2017-vaswani-aayn-6a05,2019-do-gtpncr-72ef"
-    ),
-    max_depth: int = Query(
-        2,
-        description="Maximum traversal depth for citation relationships",
-        ge=1,
-        le=5
-    ),
-    min_confidence: float = Query(
-        0.5,
-        description="Minimum confidence threshold for relationships",
-        ge=0.0,
-        le=1.0
     )
 ) -> Dict[str, Any]:
     """
-    Get relationship graph for specified literatures.
+    Get internal relationship graph for specified literatures.
     
-    This endpoint analyzes citation relationships between the specified literatures
-    and returns a graph representation of their connections using Neo4j traversal.
+    This endpoint analyzes citation relationships ONLY between the specified literatures
+    (internal relationships only, no external connections).
     
     Args:
         lids: Comma-separated string of Literature IDs to analyze
-        max_depth: Maximum depth to traverse citation relationships (1-5)
-        min_confidence: Minimum confidence threshold for including relationships (0.0-1.0)
         
     Returns:
-        Graph data structure with nodes (literatures) and edges (relationships)
+        Graph data structure with nodes (literatures) and edges (internal relationships)
         
     Raises:
         400: Invalid parameters
@@ -70,14 +56,12 @@ async def get_literature_graph(
                 detail="Too many LIDs requested. Maximum 20 LIDs per graph request.",
             )
 
-        logger.info(f"🕸️ Graph request for {len(lid_list)} LIDs with depth={max_depth}, confidence>={min_confidence}")
+        logger.info(f"🕸️ Internal graph request for {len(lid_list)} LIDs")
 
-        # Get citation graph using RelationshipDAO
+        # Get internal citation graph using RelationshipDAO
         relationship_dao = RelationshipDAO.create_from_global_connection()
-        graph_data = await relationship_dao.get_citation_graph(
-            center_lids=lid_list,
-            max_depth=max_depth,
-            min_confidence=min_confidence
+        graph_data = await relationship_dao.get_internal_citation_graph(
+            target_lids=lid_list
         )
         
         # Enhance response with metadata
@@ -87,10 +71,8 @@ async def get_literature_graph(
                 "total_nodes": len(graph_data.get("nodes", [])),
                 "total_edges": len(graph_data.get("edges", [])),
                 "requested_lids": lid_list,
-                "parameters": {
-                    "max_depth": max_depth,
-                    "min_confidence": min_confidence
-                },
+                "total_requested": len(lid_list),
+                "relationship_type": "internal_only",
                 "api_version": "0.2",
                 "status": "success"
             }

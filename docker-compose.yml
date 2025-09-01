@@ -13,6 +13,8 @@ services:
     env_file:
       - .env
     command: poetry run python -m literature_parser_backend
+    volumes:
+      - ./literature_parser_backend:/app/literature_parser_backend
     depends_on:
       neo4j:
         condition: service_healthy

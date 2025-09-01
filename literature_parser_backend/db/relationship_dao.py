@@ -422,8 +422,92 @@ class RelationshipDAO(BaseNeo4jDAO):
                 }
                 
         except Exception as e:
+            logger.error(f"Error getting citation graph: {e}")
+            raise
+    
+    async def get_internal_citation_graph(
+        self,
+        target_lids: List[str]
+    ) -> Dict[str, Any]:
+        """
+        Get internal citation relationships between specified literatures.
+        
+        Only returns relationships where BOTH source and target are in the target_lids list.
+        This shows the internal citation structure of a given set of papers.
+        
+        :param target_lids: List of literature LIDs to analyze internal relationships
+        :return: Graph data with nodes and internal edges only
+        """
+        try:
+            async with self._get_session() as session:
+                # Query for relationships where both from and to nodes are in target_lids
+                query = """
+                MATCH (from_lit:Literature)-[rel:CITES]->(to_lit:Literature)
+                WHERE from_lit.lid IN $target_lids 
+                  AND to_lit.lid IN $target_lids
+                
+                RETURN DISTINCT
+                    from_lit.lid as from_lid,
+                    to_lit.lid as to_lid,
+                    from_lit.metadata as from_metadata,
+                    to_lit.metadata as to_metadata,
+                    rel.confidence as confidence,
+                    rel.source as source,
+                    rel.created_at as created_at
+                """
+                
+                result = await session.run(
+                    query,
+                    target_lids=target_lids
+                )
+                
+                nodes = {}
+                edges = []
+                
+                # First, add all requested nodes (even if they have no relationships)
+                node_query = """
+                MATCH (lit:Literature)
+                WHERE lit.lid IN $target_lids
+                RETURN lit.lid as lid, lit.metadata as metadata
+                """
+                
+                node_result = await session.run(node_query, target_lids=target_lids)
+                async for record in node_result:
+                    lid = record["lid"]
+                    # Parse metadata JSON string
+                    metadata = self._parse_json_field(record["metadata"])
+                    title = metadata.get("title", "Unknown Title")
+                    
+                    nodes[lid] = CitationGraphNode(
+                        lid=lid,
+                        title=title,
+                        is_center=True  # All nodes are "center" in internal graph
+                    )
+                
+                # Then add relationships
+                async for record in result:
+                    from_lid = record["from_lid"]
+                    to_lid = record["to_lid"]
+                    
+                    # Add edge (nodes should already exist from above)
+                    edges.append({
+                        "from_lid": from_lid,
+                        "to_lid": to_lid,
+                        "confidence": record["confidence"],
+                        "source": record["source"],
+                        "created_at": record["created_at"] if isinstance(record["created_at"], str) else (record["created_at"].isoformat() if record["created_at"] else None)
+                    })
+                
+                return {
+                    "nodes": [node.model_dump() for node in nodes.values()],
+                    "edges": edges,
+                    "target_lids": target_lids,
+                    "relationship_type": "internal_only"
+                }
+                
+        except Exception as e:
             logger.error(f"Failed to get citation graph: {e}")
-            return {"nodes": [], "edges": [], "center_lids": center_lids}
+            return {"nodes": [], "edges": [], "target_lids": target_lids}
     
     # ========== Batch Operations ==========
     
