@@ -606,6 +606,43 @@ async def _check_and_handle_post_metadata_duplicate(
     and returns the LID of the existing literature.
     """
     logger.info(f"🕵️‍♂️ [Secondary Dedup] Starting for placeholder {placeholder_lid} with title='{metadata.title}' and DOI='{identifiers.doi}'")
+    
+    # 🔍 Debug: 详细搜索现有文献
+    try:
+        # 1. 按标题搜索
+        candidates_debug = await dao.find_by_title_fuzzy(metadata.title, limit=10)
+        logger.info(f"🔍 [Secondary Dedup] DEBUG - 按标题搜索到 {len(candidates_debug)} 个候选文献")
+        for i, cand in enumerate(candidates_debug):
+            if cand and cand.metadata:
+                logger.info(f"🔍 [Secondary Dedup] DEBUG - 候选 {i+1}: {cand.lid} - '{cand.metadata.title}' (年份: {getattr(cand.metadata, 'year', 'N/A')})")
+        
+        # 2. 查看数据库中的所有文献（用于调试）
+        all_literature_debug = await dao.get_all_literature(limit=20)
+        logger.info(f"🔍 [Secondary Dedup] DEBUG - 数据库中总共有 {len(all_literature_debug)} 篇文献:")
+        for i, lit in enumerate(all_literature_debug):
+            if lit and lit.metadata:
+                logger.info(f"🔍 [Secondary Dedup] DEBUG - 数据库文献 {i+1}: {lit.lid} - '{lit.metadata.title}' (年份: {getattr(lit.metadata, 'year', 'N/A')})")
+        
+        # 3. 检查当前标题和第一个文献的匹配情况（如果存在）
+        if all_literature_debug and len(all_literature_debug) > 0:
+            first_lit = all_literature_debug[0]
+            if first_lit and first_lit.metadata:
+                logger.info(f"🔍 [Secondary Dedup] DEBUG - 比较当前标题: '{metadata.title}' 与第一个文献: '{first_lit.metadata.title}'")
+                # 使用标题匹配工具进行详细比较
+                from ..utils.title_matching import TitleMatchingUtils, MatchingMode
+                is_match = TitleMatchingUtils.is_acceptable_match(
+                    first_lit.metadata.title, metadata.title, mode=MatchingMode.STRICT
+                )
+                logger.info(f"🔍 [Secondary Dedup] DEBUG - 严格模式匹配结果: {is_match}")
+                is_match_standard = TitleMatchingUtils.is_acceptable_match(
+                    first_lit.metadata.title, metadata.title, mode=MatchingMode.STANDARD
+                )
+                logger.info(f"🔍 [Secondary Dedup] DEBUG - 标准模式匹配结果: {is_match_standard}")
+                
+    except Exception as e:
+        logger.warning(f"🔍 [Secondary Dedup] DEBUG - 检查时出错: {e}")
+        import traceback
+        logger.warning(f"🔍 [Secondary Dedup] DEBUG - 错误详情: {traceback.format_exc()}")
     existing_lit = None
     # 1. Check by DOI first (most reliable)
     if identifiers and identifiers.doi:
@@ -616,6 +653,10 @@ async def _check_and_handle_post_metadata_duplicate(
         # Use fuzzy search to get candidates, then a more precise similarity check
         candidates = await dao.find_by_title_fuzzy(metadata.title, limit=5)
         logger.info(f"🕵️‍♂️ [Secondary Dedup] Found {len(candidates)} candidates by fuzzy title search for '{metadata.title}'")
+        
+        # 🔍 Debug: 列出所有候选文献详情
+        for i, cand in enumerate(candidates):
+            logger.info(f"🕵️‍♂️ [Secondary Dedup]   Candidate {i+1}: LID={cand.lid}, Title='{cand.metadata.title if cand.metadata else 'N/A'}'")
         for cand_lit in candidates:
             if not cand_lit or not cand_lit.metadata or not cand_lit.metadata.title:
                 logger.warning(f"🕵️‍♂️ [Secondary Dedup] Skipping invalid candidate: {cand_lit}")
@@ -878,6 +919,23 @@ async def _process_literature_async(
                 source="SmartRouter",
                 next_action=None,
             )
+            
+            # 🔍 元数据解析完成后的重复检查
+            logger.info(f"🔍 Task {task_id}: 开始元数据解析后的重复检查")
+            existing_lit_lid = await _check_and_handle_post_metadata_duplicate(
+                dao=dao,
+                identifiers=identifiers,
+                metadata=metadata,
+                source_data=source,
+                placeholder_lid=literature_id,
+                task_id=task_id
+            )
+            
+            if existing_lit_lid:
+                logger.info(f"✅ Task {task_id}: 发现重复文献 {existing_lit_lid}，停止处理并返回已有文献")
+                return task_manager.complete_task(TaskResultType.DUPLICATE, existing_lit_lid)
+            
+            logger.info(f"✅ Task {task_id}: 无重复文献，继续处理流程")
         else:
             # 传统流程需要初始化变量（如果传统流程被启用的话）
             logger.warning(f"⚠️ Task {task_id}: 智能路由未完成，但传统流程被注释")
@@ -1094,8 +1152,15 @@ async def _process_literature_async(
         # 🔧 智能路由和传统流程的统一返回
         if 'smart_router_completed' in locals() and smart_router_completed:
             # 智能路由完成，合并结果
-            result_type = TaskResultType.PARSING_FAILED if is_parsing_failed else TaskResultType.CREATED
-            logger.info(f"✅ Task {task_id}: 智能路由+引用解析完成 (状态: {result_type})")
+            # 🎯 基于实际组件状态判断结果类型，而不是标题检查
+            if final_overall_status == "completed":
+                result_type = TaskResultType.CREATED
+            elif final_overall_status in ["partial_completed", "processing"]:
+                result_type = TaskResultType.CREATED  # 部分成功也算创建成功
+            else:  # failed
+                result_type = TaskResultType.PARSING_FAILED
+            
+            logger.info(f"✅ Task {task_id}: 智能路由+引用解析完成 (状态: {final_overall_status} -> {result_type})")
             final_result = task_manager.complete_task(result_type, literature_id)
             
             # 添加智能路由的额外信息
@@ -1110,11 +1175,18 @@ async def _process_literature_async(
             return final_result
         else:
             # 纯传统流程
-            result_type = TaskResultType.PARSING_FAILED if is_parsing_failed else TaskResultType.CREATED
-            logger.info(f"✅ Task {task_id}: 传统流程完成 (状态: {result_type})")
+            # 🎯 基于实际组件状态判断结果类型，而不是标题检查
+            if final_overall_status == "completed":
+                result_type = TaskResultType.CREATED
+            elif final_overall_status in ["partial_completed", "processing"]:
+                result_type = TaskResultType.CREATED  # 部分成功也算创建成功
+            else:  # failed
+                result_type = TaskResultType.PARSING_FAILED
+            
+            logger.info(f"✅ Task {task_id}: 传统流程完成 (状态: {final_overall_status} -> {result_type})")
             # Return LID instead of MongoDB ObjectId for API consistency
             final_result = task_manager.complete_task(result_type, literature.lid or literature_id)
-            final_result['is_parsing_failed'] = is_parsing_failed
+            final_result['is_parsing_failed'] = (result_type == TaskResultType.PARSING_FAILED)
             return final_result
 
 

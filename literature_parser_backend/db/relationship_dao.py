@@ -628,6 +628,10 @@ class RelationshipDAO(BaseNeo4jDAO):
             True if relationship created successfully
         """
         try:
+            # Prevent self-referencing (论文不能引用自己)
+            if citing_lid == cited_lid:
+                logger.warning(f"🚫 Prevented self-citation: {citing_lid} → {cited_lid}")
+                return False
             async with self._get_session() as session:
                 # Prepare relationship properties
                 props = {

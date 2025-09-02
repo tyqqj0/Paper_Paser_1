@@ -102,7 +102,7 @@ class DeduplicationHook(Hook):
         
         # 基于标题+作者查重 (简化版)
         if metadata.title and metadata.authors:
-            title_matches = await self.dao.find_by_title_fuzzy(metadata.title, threshold=0.9)
+            title_matches = await self.dao.find_by_title_fuzzy(metadata.title, limit=5)
             for match in title_matches:
                 if match.lid != current_id and match.lid not in duplicates:
                     # 简单的作者匹配检查
@@ -112,23 +112,17 @@ class DeduplicationHook(Hook):
         return duplicates
     
     def _authors_match(self, authors1: List[Dict], authors2: List[Dict], threshold: float = 0.7) -> bool:
-        """简单的作者匹配算法"""
-        if not authors1 or not authors2:
-            return False
+        """智能作者匹配算法 - 支持不同姓名格式"""
+        from ...utils.author_matching import AuthorMatchingUtils
         
-        # 提取作者姓名
-        names1 = {author.get('name', '') for author in authors1}
-        names2 = {author.get('name', '') for author in authors2}
+        is_match, similarity = AuthorMatchingUtils.match_authors(authors1, authors2, threshold)
         
-        # 计算交集比例
-        intersection = len(names1 & names2)
-        union = len(names1 | names2)
+        # 记录调试信息
+        if logger.isEnabledFor(10):  # DEBUG level
+            details = AuthorMatchingUtils.match_authors_detailed(authors1, authors2, threshold)
+            logger.debug(f"作者匹配结果: {details}")
         
-        if union == 0:
-            return False
-            
-        similarity = intersection / union
-        return similarity >= threshold
+        return is_match
     
     async def _handle_duplicates(self, literature_id: str, duplicates: List[str], context: Dict[str, Any]) -> Dict:
         """处理发现的重复项"""

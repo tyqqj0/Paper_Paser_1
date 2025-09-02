@@ -389,69 +389,238 @@ class DataPipeline:
             # 去重失败时保守处理，返回无重复
             return {'is_duplicate': False}
     
-    def _is_title_match(self, title1: str, title2: str, threshold: float = 0.8) -> bool:
-        """标题匹配检查"""
+    def _is_title_match(self, title1: str, title2: str, threshold: float = 0.85) -> bool:
+        """改进的标题匹配检查"""
         if not title1 or not title2:
             return False
         
-        # 简化的标题匹配 (可以后续优化)
+        # 🔧 改进：标题预处理 - 去除标点、多余空格、统一大小写
+        def normalize_title(title: str) -> str:
+            import re
+            # 去除常见的标点符号和特殊字符
+            normalized = re.sub(r'[^\w\s]', ' ', title.lower())
+            # 去除多余空格
+            normalized = ' '.join(normalized.split())
+            return normalized
+        
+        norm_title1 = normalize_title(title1)
+        norm_title2 = normalize_title(title2)
+        
+        # 🔧 改进：多层次匹配
         from difflib import SequenceMatcher
-        similarity = SequenceMatcher(None, title1.lower(), title2.lower()).ratio()
-        return similarity >= threshold
+        
+        # 1. 完全匹配（预处理后）
+        if norm_title1 == norm_title2:
+            logger.debug(f"[标题匹配] 完全匹配: {title1[:50]}...")
+            return True
+        
+        # 2. 高相似度匹配（降低阈值到0.85）
+        similarity = SequenceMatcher(None, norm_title1, norm_title2).ratio()
+        
+        if similarity >= threshold:
+            logger.debug(f"[标题匹配] 高相似度匹配 ({similarity:.3f}): {title1[:50]}...")
+            return True
+        
+        # 3. 关键词匹配（提取重要词汇，如果有80%以上重叠则认为匹配）
+        words1 = set(w for w in norm_title1.split() if len(w) > 3)  # 忽略长度<=3的词
+        words2 = set(w for w in norm_title2.split() if len(w) > 3)
+        
+        word_similarity = 0.0
+        if words1 and words2:
+            word_similarity = len(words1 & words2) / min(len(words1), len(words2))
+            if word_similarity >= 0.8:
+                logger.debug(f"[标题匹配] 关键词匹配 ({word_similarity:.3f}): {title1[:50]}...")
+                return True
+        
+        logger.debug(f"[标题匹配] 无匹配 (相似度: {similarity:.3f}, 关键词: {word_similarity:.3f}): {title1[:50]}...")
+        return False
     
-    def _is_author_match(self, authors1, authors2, threshold: float = 0.6) -> bool:
-        """作者匹配检查"""
+    def _is_author_match(self, authors1, authors2, threshold: float = 0.5) -> bool:
+        """智能作者匹配检查 - 支持不同格式的姓名匹配"""
         # 🔧 防护性检查
         if not authors1 or not authors2:
             return False
         
-        # 确保是列表
-        if not isinstance(authors1, list):
-            return False
-        if not isinstance(authors2, list):
-            return False
-        
         try:
-            # 提取作者姓名
-            names1 = set()
-            for author in authors1:
-                if isinstance(author, dict):
-                    name = author.get('name', '')
-                elif isinstance(author, str):
-                    name = author
-                else:
-                    # 如果author有name属性
-                    name = getattr(author, 'name', '')
-                
-                if name:
-                    names1.add(name.strip())
+            # 标准化作者列表格式
+            def normalize_author_list(authors):
+                """将不同格式的作者列表转换为统一格式"""
+                normalized = []
+                for author in authors:
+                    if isinstance(author, dict):
+                        name = author.get('name', '')
+                    elif isinstance(author, str):
+                        name = author
+                    else:
+                        # 如果author有name属性
+                        name = getattr(author, 'name', '') if hasattr(author, 'name') else str(author)
+                    
+                    if name and name.strip():
+                        normalized.append(name.strip())
+                        
+                return normalized
             
-            names2 = set()
-            for author in authors2:
-                if isinstance(author, dict):
-                    name = author.get('name', '')
-                elif isinstance(author, str):
-                    name = author
-                else:
-                    # 如果author有name属性
-                    name = getattr(author, 'name', '')
-                
-                if name:
-                    names2.add(name.strip())
+            # 规范化作者列表
+            names1 = normalize_author_list(authors1)
+            names2 = normalize_author_list(authors2)
             
-            # 计算交集比例
-            if len(names1) == 0 or len(names2) == 0:
+            if not names1 or not names2:
                 return False
             
-            intersection = len(names1 & names2)
-            min_authors = min(len(names1), len(names2))
-            similarity = intersection / min_authors
+            # 生成作者姓名变体
+            def get_author_name_variants(name: str) -> set:
+                """生成作者姓名的所有可能变体"""
+                import re
+                if not name:
+                    return set()
+                
+                # 规范化：去除标点，转小写，处理多余空格
+                normalized = re.sub(r'[^\w\s]', ' ', name.lower())
+                normalized = ' '.join(normalized.split())
+                
+                variants = {normalized}
+                
+                # 处理 "姓, 名" 格式，转换为统一的 "名 姓" 格式
+                if ',' in name:
+                    parts = [part.strip() for part in name.split(',')]
+                    if len(parts) == 2:
+                        # 转换为 "名 姓" 格式
+                        converted = f"{parts[1]} {parts[0]}"
+                        converted = re.sub(r'[^\w\s]', ' ', converted.lower())
+                        converted = ' '.join(converted.split())
+                        variants.add(converted)
+                
+                # 如果包含空格，尝试交换姓名顺序
+                parts = normalized.split()
+                if len(parts) == 2:
+                    # 添加反向顺序
+                    variants.add(f"{parts[1]} {parts[0]}")
+                
+                return variants
             
-            return similarity >= threshold
+            # 计算匹配作者数量
+            matched_count = 0
+            total_authors = max(len(names1), len(names2))
+            
+            for name1 in names1:
+                variants1 = get_author_name_variants(name1)
+                matched = False
+                
+                for name2 in names2:
+                    variants2 = get_author_name_variants(name2)
+                    
+                    # 检查是否有任何变体匹配
+                    for var1 in variants1:
+                        for var2 in variants2:
+                            if var1 and var2:
+                                # 完全匹配
+                                if var1 == var2:
+                                    matched_count += 1
+                                    matched = True
+                                    logger.debug(f"[作者匹配] 完全匹配: {name1} ≈ {name2} ({var1})")
+                                    break
+                                
+                                # 高相似度匹配
+                                from difflib import SequenceMatcher
+                                similarity = SequenceMatcher(None, var1, var2).ratio()
+                                if similarity >= 0.8:
+                                    matched_count += 1
+                                    matched = True
+                                    logger.debug(f"[作者匹配] 高相似度匹配: {name1} ≈ {name2} (相似度: {similarity:.3f})")
+                                    break
+                        
+                        if matched:
+                            break
+                    
+                    if matched:
+                        break
+            
+            match_ratio = matched_count / total_authors if total_authors > 0 else 0
+            is_match = match_ratio >= threshold
+            
+            logger.debug(f"[作者匹配] 匹配结果: {is_match} (匹配率: {matched_count}/{total_authors} = {match_ratio:.3f}, 阈值: {threshold})")
+            
+            return is_match
             
         except Exception as e:
             logger.warning(f"[数据管道] 作者匹配检查异常: {e}")
             return False
+    
+    def _normalize_author_name(self, name: str) -> str:
+        """规范化作者姓名"""
+        import re
+        
+        # 去除多余空格和特殊字符
+        name = re.sub(r'[^\w\s\.]', ' ', name)
+        name = ' '.join(name.split())
+        
+        # 转为小写便于比较
+        return name.lower().strip()
+    
+    def _is_same_author(self, name1: str, name2: str) -> bool:
+        """判断两个姓名是否为同一作者 - 支持多种格式匹配"""
+        if not name1 or not name2:
+            return False
+        
+        # 1. 完全匹配
+        if name1 == name2:
+            return True
+        
+        # 2. 提取姓名组件进行智能匹配
+        def extract_name_parts(name):
+            import re
+            # 分割姓名，提取有意义的部分
+            parts = name.split()
+            full_parts = []
+            initials = []
+            
+            for part in parts:
+                if len(part) == 1 or (len(part) == 2 and part.endswith('.')):
+                    # 首字母缩写
+                    initials.append(part.rstrip('.').lower())
+                elif len(part) > 1:
+                    # 完整姓名
+                    full_parts.append(part.lower())
+            
+            return full_parts, initials
+        
+        parts1, initials1 = extract_name_parts(name1)
+        parts2, initials2 = extract_name_parts(name2)
+        
+        # 3. 检查完整姓名部分是否有重叠
+        full_overlap = len(set(parts1) & set(parts2))
+        
+        # 4. 检查首字母是否匹配
+        initial_matches = 0
+        for init1 in initials1:
+            for part2 in parts2:
+                if part2.startswith(init1):
+                    initial_matches += 1
+                    break
+        
+        for init2 in initials2:
+            for part1 in parts1:
+                if part1.startswith(init2):
+                    initial_matches += 1
+                    break
+        
+        # 5. 匹配逻辑
+        total_parts1 = len(parts1) + len(initials1)
+        total_parts2 = len(parts2) + len(initials2)
+        
+        if total_parts1 == 0 or total_parts2 == 0:
+            return False
+        
+        # 如果有完整姓名重叠，认为是同一作者
+        if full_overlap > 0:
+            return True
+        
+        # 如果有首字母匹配且匹配度足够高，认为是同一作者
+        min_parts = min(total_parts1, total_parts2)
+        if initial_matches > 0 and initial_matches >= min_parts * 0.6:
+            return True
+        
+        return False
     
     async def _create_literature(self, literature_data: Dict, task_id: str) -> Dict[str, Any]:
         """创建新文献 - 统一的数据库写入"""

@@ -41,6 +41,11 @@ async def connect_to_mongodb(
         settings = Settings()
     
     try:
+        # 🔧 修复：禁用Neo4j驱动程序的详细日志
+        import logging
+        neo4j_logger = logging.getLogger("neo4j")
+        neo4j_logger.setLevel(logging.WARNING)
+        
         # Create Neo4j driver
         _driver = AsyncGraphDatabase.driver(
             settings.neo4j_uri,
@@ -225,6 +230,11 @@ async def create_task_connection(
         settings = Settings()
     
     try:
+        # 🔧 修复：禁用任务级Neo4j驱动程序的详细日志
+        import logging
+        neo4j_logger = logging.getLogger("neo4j")
+        neo4j_logger.setLevel(logging.WARNING)
+        
         # Create task-specific Neo4j driver
         driver = AsyncGraphDatabase.driver(
             settings.neo4j_uri,

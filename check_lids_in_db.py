@@ -6,11 +6,12 @@
 import asyncio
 import httpx
 
-# 测试几个LID
+# 测试几个LID，包括真实存在的重复attention论文
 TEST_LIDS = [
-    "2017-vaswani-aayn-6096",
-    "2020-dosovits-iwwtir-e64e", 
-    "2015-he-drlir-8046",
+    "2017-ashish-aayn-fa59",   # Attention is All you Need (重复1)
+    "2017-vaswani-aayn-9572",  # Attention Is All You Need (重复2) 
+    "2020-dosovits-iwwtir-8421", # ViT论文
+    "1992-polyak-asaa-c089",   # 优化论文
 ]
 
 async def check_lids_exist():
@@ -28,7 +29,8 @@ async def check_lids_exist():
                 # 尝试通过graphs API检查（即使没有关系，也应该返回节点）
                 response = await client.get(
                     f"{base_url}/graphs",
-                    params={"lids": lid}
+                    params={"lids": lid},
+                    timeout=10.0
                 )
                 
                 if response.status_code == 200:
@@ -38,14 +40,23 @@ async def check_lids_exist():
                     
                     if nodes:
                         for node in nodes:
-                            print(f"   ✅ 找到: {node.get('lid')} - {node.get('title', 'No title')[:50]}...")
+                            title = node.get('title', 'No title')
+                            print(f"   ✅ 找到: {node.get('lid')} - {title[:50]}...")
                     else:
-                        print(f"   ⚠️ API正常但没有找到节点，可能LID不存在于数据库")
+                        print(f"   ⚠️ API正常但没有找到节点，LID可能不存在于数据库中")
+                        # 显示完整响应以供调试
+                        print(f"   🔍 完整响应: {data}")
                 else:
                     print(f"   ❌ API错误: {response.status_code}")
+                    error_text = response.text if hasattr(response, 'text') else 'No error details'
+                    print(f"   📄 错误详情: {error_text[:100]}...")
                     
+            except httpx.ConnectError as e:
+                print(f"   🔌 连接错误: 无法连接到 {base_url} - {e}")
+            except httpx.TimeoutException as e:
+                print(f"   ⏰ 超时错误: {e}")
             except Exception as e:
-                print(f"   💥 异常: {e}")
+                print(f"   💥 未知异常: {type(e).__name__}: {e}")
             
             print()
 
