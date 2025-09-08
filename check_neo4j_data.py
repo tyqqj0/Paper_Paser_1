@@ -6,7 +6,7 @@
 import asyncio
 from literature_parser_backend.db.dao import LiteratureDAO
 from literature_parser_backend.db.relationship_dao import RelationshipDAO
-from literature_parser_backend.db.neo4j import connect_to_mongodb, disconnect_from_mongodb
+from literature_parser_backend.db.neo4j import connect_to_neo4j, disconnect_from_neo4j
 from literature_parser_backend.settings import get_settings
 
 async def check_neo4j_data():
@@ -18,7 +18,7 @@ async def check_neo4j_data():
         # 初始化数据库连接
         print("🔌 初始化数据库连接...")
         settings = get_settings()
-        await connect_to_mongodb(settings)
+        await connect_to_neo4j(settings)
         print("   ✅ 数据库连接成功")
         
         # 检查文献数据

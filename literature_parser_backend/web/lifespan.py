@@ -7,8 +7,8 @@ from fastapi import FastAPI
 from loguru import logger
 
 from literature_parser_backend.db.neo4j import (
-    connect_to_mongodb,  # Actually connects to Neo4j (compatibility name)
-    disconnect_from_mongodb,  # Actually disconnects from Neo4j
+    connect_to_neo4j,
+    disconnect_from_neo4j,
 )
 
 
@@ -28,7 +28,7 @@ async def lifespan_setup(
     # Initialize Neo4j connection
     try:
         logger.info("Initializing Neo4j connection...")
-        await connect_to_mongodb()  # Actually connects to Neo4j
+        await connect_to_neo4j()
         logger.info("Neo4j connection established successfully")
     except Exception as e:
         logger.error(f"Failed to connect to Neo4j: {e}")
@@ -39,7 +39,7 @@ async def lifespan_setup(
     # Cleanup on shutdown
     try:
         logger.info("Closing Neo4j connection...")
-        await disconnect_from_mongodb()  # Actually disconnects from Neo4j
+        await disconnect_from_neo4j()
         logger.info("Neo4j connection closed")
     except Exception as e:
         logger.error(f"Error closing Neo4j connection: {e}")

@@ -12,8 +12,8 @@ from celery.signals import (
 )
 
 from literature_parser_backend.db.neo4j import (
-    connect_to_mongodb,  # Actually connects to Neo4j (compatibility name)
-    disconnect_from_mongodb,  # Actually disconnects from Neo4j
+    connect_to_neo4j,
+    disconnect_from_neo4j,
 )
 from literature_parser_backend.settings import Settings
 
@@ -34,7 +34,7 @@ def init_worker_process(sender=None, **kwargs):
     try:
         logger.info("Initializing Neo4j connection for worker process...")
         # Run the async connect function in the event loop
-        loop.run_until_complete(connect_to_mongodb())
+        loop.run_until_complete(connect_to_neo4j())
         logger.info("Neo4j connection established for worker process")
     except Exception as e:
         logger.error(f"Failed to connect to Neo4j in worker process: {e}")
@@ -55,7 +55,7 @@ def cleanup_worker_process(sender=None, **kwargs):
     try:
         logger.info("Closing Neo4j connection for worker process...")
         # Run the async disconnect function in the event loop
-        loop.run_until_complete(disconnect_from_mongodb())
+        loop.run_until_complete(disconnect_from_neo4j())
         logger.info("Neo4j connection closed for worker process")
     except Exception as e:
         logger.error(f"Error closing Neo4j connection in worker process: {e}")

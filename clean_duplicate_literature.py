@@ -26,7 +26,7 @@ async def find_duplicate_groups() -> List[List[Dict]]:
     pipeline = DataPipeline(dao)
     
     # 获取所有文献
-    all_literature = await dao.find_all()
+    all_literature = await dao.get_all_literature(limit=10000)  # 增加限制避免内存问题
     print(f"📚 总共找到 {len(all_literature)} 篇文献")
     
     if len(all_literature) < 2:

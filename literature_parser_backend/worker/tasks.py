@@ -654,6 +654,10 @@ async def _check_and_handle_post_metadata_duplicate(
         candidates = await dao.find_by_title_fuzzy(metadata.title, limit=5)
         logger.info(f"🕵️‍♂️ [Secondary Dedup] Found {len(candidates)} candidates by fuzzy title search for '{metadata.title}'")
         
+        # Filter out the current placeholder to avoid self-matching
+        candidates = [cand for cand in candidates if cand.lid != placeholder_lid]
+        logger.info(f"🕵️‍♂️ [Secondary Dedup] After filtering out placeholder {placeholder_lid}: {len(candidates)} candidates remain")
+        
         # 🔍 Debug: 列出所有候选文献详情
         for i, cand in enumerate(candidates):
             logger.info(f"🕵️‍♂️ [Secondary Dedup]   Candidate {i+1}: LID={cand.lid}, Title='{cand.metadata.title if cand.metadata else 'N/A'}'")
@@ -747,98 +751,97 @@ async def _process_literature_async(
         route_manager = RouteManager.get_instance()
         route = route_manager.determine_route(url)
         
-        # 只有在能处理时才创建SmartRouter实例
-        if route and route.name != "standard_waterfall":  # 标准瀑布流说明没有专门路由
-            logger.info(f"🚀 Task {task_id}: 智能路由启动: {url} -> {route.name}")
-            smart_router = SmartRouter(dao)
+        # 🔧 修复：所有路由都应该走智能路由，包括standard_waterfall
+        logger.info(f"🚀 Task {task_id}: 智能路由启动: {url} -> {route.name}")
+        smart_router = SmartRouter(dao)
+        
+        try:
+            router_result = await smart_router.route_and_process(url, source, task_id)
             
-            try:
-                router_result = await smart_router.route_and_process(url, source, task_id)
+            # 检查智能路由结果
+            if router_result.get('status') == 'completed':
+                logger.info(f"✅ Task {task_id}: 智能路由完成，耗时: {router_result.get('execution_time', 0):.2f}s")
                 
-                # 检查智能路由结果
-                if router_result.get('status') == 'completed':
-                    logger.info(f"✅ Task {task_id}: 智能路由完成，耗时: {router_result.get('execution_time', 0):.2f}s")
-                    
-                    # 转换为标准任务结果格式
-                    result_type = 'duplicate' if router_result.get('result_type') == 'duplicate' else 'created'
-                    final_result = task_manager.complete_task(
-                        TaskResultType.DUPLICATE if result_type == 'duplicate' else TaskResultType.CREATED,
-                        router_result.get('literature_id')
-                    )
-                    
-                    # 添加智能路由的额外信息
-                    final_result.update({
-                        'route_used': router_result.get('route_used'),
-                        'processor_used': router_result.get('processor_used'),
-                        'execution_time': router_result.get('execution_time')
-                    })
-                    
-                    # 🔧 混合模式：智能路由完成，为传统引用解析准备变量
-                    if router_result.get('result_type') == 'duplicate':
-                        # 重复文献直接返回，无需引用解析
-                        return final_result
-                    else:
-                        # 新创建的文献：准备变量，继续执行传统引用解析
-                        logger.info(f"🔄 Task {task_id}: 智能路由完成，准备传统引用解析")
-                        
-                        # 🎯 从智能路由结果中提取必要变量给传统流程使用
-                        literature_id = router_result.get('literature_id')  # 这是LID
-                        
-                        # 🔧 关键修复：提取智能路由中的原始标识符信息
-                        router_identifiers = router_result.get('identifiers')
-                        
-                        # 从DAO获取完整的文献对象
-                        try:
-                            literature_obj = await dao.find_by_lid(literature_id)
-                            if literature_obj:
-                                metadata = literature_obj.metadata
-                                
-                                # 🔧 关键修复：保留原始标识符信息用于引用解析
-                                if router_identifiers:
-                                    # 🔧 处理智能路由返回的标识符格式（可能是字典）
-                                    from literature_parser_backend.models.literature import IdentifiersModel
-                                    if isinstance(router_identifiers, dict):
-                                        identifiers = IdentifiersModel(
-                                            doi=router_identifiers.get('doi'),
-                                            arxiv_id=router_identifiers.get('arxiv_id'),
-                                            pmid=router_identifiers.get('pmid')
-                                        )
-                                        logger.info(f"🔗 Task {task_id}: 智能路由字典标识符已转换: DOI={identifiers.doi}, ArXiv={identifiers.arxiv_id}")
-                                    else:
-                                        identifiers = router_identifiers
-                                        logger.info(f"🔗 Task {task_id}: 使用智能路由原始标识符: DOI={identifiers.doi}, ArXiv={identifiers.arxiv_id}")
-                                else:
-                                    # 备选方案：从元数据中提取
-                                    from literature_parser_backend.models.literature import IdentifiersModel
-                                    identifiers = IdentifiersModel()
-                                    if metadata and hasattr(metadata, 'doi') and metadata.doi:
-                                        identifiers.doi = metadata.doi
-                                    logger.info(f"🔗 Task {task_id}: 备选 - 从元数据提取标识符: DOI={identifiers.doi}")
-                                
-                                # 设置标志表示已完成智能路由
-                                smart_router_completed = True
-                                smart_router_result = router_result
-                                logger.info(f"🔗 Task {task_id}: 准备引用解析，文献: {literature_id}")
-                            else:
-                                logger.error(f"❌ Task {task_id}: 无法找到刚创建的文献: {literature_id}")
-                                return final_result
-                        except Exception as e:
-                            logger.error(f"❌ Task {task_id}: 获取文献对象失败: {e}")
-                            return final_result
-                    
-                elif router_result.get('fallback_to_legacy'):
-                    logger.warning(f"⚠️ Task {task_id}: 智能路由建议回退: {router_result.get('error')}")
-                    smart_router_result = router_result  # 保存错误信息
-                    # 继续执行传统流程
+                # 转换为标准任务结果格式
+                result_type = 'duplicate' if router_result.get('result_type') == 'duplicate' else 'created'
+                final_result = task_manager.complete_task(
+                    TaskResultType.DUPLICATE if result_type == 'duplicate' else TaskResultType.CREATED,
+                    router_result.get('literature_id')
+                )
+                
+                # 添加智能路由的额外信息
+                final_result.update({
+                    'route_used': router_result.get('route_used'),
+                    'processor_used': router_result.get('processor_used'),
+                    'execution_time': router_result.get('execution_time')
+                })
+                
+                # 🔧 混合模式：智能路由完成，为传统引用解析准备变量
+                if router_result.get('result_type') == 'duplicate':
+                    # 重复文献直接返回，无需引用解析
+                    return final_result
                 else:
-                    logger.error(f"❌ Task {task_id}: 智能路由失败: {router_result.get('error')}")
-                    smart_router_result = router_result  # 保存错误信息
-                    # 继续执行传统流程
+                    # 新创建的文献：准备变量，继续执行传统引用解析
+                    logger.info(f"🔄 Task {task_id}: 智能路由完成，准备传统引用解析")
                     
-            except Exception as e:
-                logger.error(f"❌ Task {task_id}: 智能路由异常: {e}")
-                smart_router_result = {'error': str(e), 'error_type': 'system_error'}  # 保存异常信息
+                    # 🎯 从智能路由结果中提取必要变量给传统流程使用
+                    literature_id = router_result.get('literature_id')  # 这是LID
+                    
+                    # 🔧 关键修复：提取智能路由中的原始标识符信息
+                    router_identifiers = router_result.get('identifiers')
+                    
+                    # 从DAO获取完整的文献对象
+                    try:
+                        literature_obj = await dao.find_by_lid(literature_id)
+                        if literature_obj:
+                            metadata = literature_obj.metadata
+                            
+                            # 🔧 关键修复：保留原始标识符信息用于引用解析
+                            if router_identifiers:
+                                # 🔧 处理智能路由返回的标识符格式（可能是字典）
+                                from literature_parser_backend.models.literature import IdentifiersModel
+                                if isinstance(router_identifiers, dict):
+                                    identifiers = IdentifiersModel(
+                                        doi=router_identifiers.get('doi'),
+                                        arxiv_id=router_identifiers.get('arxiv_id'),
+                                        pmid=router_identifiers.get('pmid')
+                                    )
+                                    logger.info(f"🔗 Task {task_id}: 智能路由字典标识符已转换: DOI={identifiers.doi}, ArXiv={identifiers.arxiv_id}")
+                                else:
+                                    identifiers = router_identifiers
+                                    logger.info(f"🔗 Task {task_id}: 使用智能路由原始标识符: DOI={identifiers.doi}, ArXiv={identifiers.arxiv_id}")
+                            else:
+                                # 备选方案：从元数据中提取
+                                from literature_parser_backend.models.literature import IdentifiersModel
+                                identifiers = IdentifiersModel()
+                                if metadata and hasattr(metadata, 'doi') and metadata.doi:
+                                    identifiers.doi = metadata.doi
+                                logger.info(f"🔗 Task {task_id}: 备选 - 从元数据提取标识符: DOI={identifiers.doi}")
+                            
+                            # 设置标志表示已完成智能路由
+                            smart_router_completed = True
+                            smart_router_result = router_result
+                            logger.info(f"🔗 Task {task_id}: 准备引用解析，文献: {literature_id}")
+                        else:
+                            logger.error(f"❌ Task {task_id}: 无法找到刚创建的文献: {literature_id}")
+                            return final_result
+                    except Exception as e:
+                        logger.error(f"❌ Task {task_id}: 获取文献对象失败: {e}")
+                        return final_result
+                
+            elif router_result.get('fallback_to_legacy'):
+                logger.warning(f"⚠️ Task {task_id}: 智能路由建议回退: {router_result.get('error')}")
+                smart_router_result = router_result  # 保存错误信息
                 # 继续执行传统流程
+            else:
+                logger.error(f"❌ Task {task_id}: 智能路由失败: {router_result.get('error')}")
+                smart_router_result = router_result  # 保存错误信息
+                # 继续执行传统流程
+                    
+        except Exception as e:
+            logger.error(f"❌ Task {task_id}: 智能路由异常: {e}")
+            smart_router_result = {'error': str(e), 'error_type': 'system_error'}  # 保存异常信息
+            # 继续执行传统流程
         
         # 📋 传统瀑布流处理逻辑 (保持原有逻辑作为备选方案)
         

@@ -6,7 +6,7 @@
 import asyncio
 import json
 from literature_parser_backend.db.relationship_dao import RelationshipDAO
-from literature_parser_backend.db.neo4j import connect_to_mongodb
+from literature_parser_backend.db.neo4j import connect_to_neo4j
 from literature_parser_backend.settings import Settings
 
 # 已知的重复论文LID
@@ -20,7 +20,7 @@ async def analyze_duplicate_papers():
     
     # 初始化连接
     settings = Settings()
-    await connect_to_mongodb(settings)
+    await connect_to_neo4j(settings)
     
     # 初始化DAO
     relationship_dao = RelationshipDAO.create_from_global_connection()

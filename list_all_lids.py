@@ -5,7 +5,7 @@
 
 import asyncio
 from literature_parser_backend.db.relationship_dao import RelationshipDAO
-from literature_parser_backend.db.neo4j import connect_to_mongodb
+from literature_parser_backend.db.neo4j import connect_to_neo4j
 from literature_parser_backend.settings import Settings
 
 async def list_all_lids():
@@ -13,7 +13,7 @@ async def list_all_lids():
     
     # 初始化连接
     settings = Settings()
-    await connect_to_mongodb(settings)
+    await connect_to_neo4j()
     
     # 初始化DAO
     relationship_dao = RelationshipDAO.create_from_global_connection()

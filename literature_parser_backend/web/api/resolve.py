@@ -11,11 +11,56 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import JSONResponse
 
 from literature_parser_backend.models.literature import LiteratureCreateRequestDTO
+from literature_parser_backend.models.task import ComponentStatus
 from literature_parser_backend.worker.tasks import process_literature_task
 from literature_parser_backend.db.alias_dao import AliasDAO
+from literature_parser_backend.db.dao import LiteratureDAO
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/resolve", tags=["文献解析"])
+
+
+def _is_literature_successfully_parsed(literature) -> bool:
+    """
+    Check if a literature is successfully parsed.
+    
+    A literature is considered successfully parsed if:
+    1. It has task_info with metadata component status as SUCCESS
+    2. It has basic metadata (title and at least one identifier)
+    
+    Args:
+        literature: LiteratureModel instance
+        
+    Returns:
+        bool: True if successfully parsed, False otherwise
+    """
+    try:
+        # Check if task_info exists and has metadata component
+        if not literature.task_info or not literature.task_info.components:
+            return False
+            
+        # Check metadata component status
+        metadata_status = literature.task_info.components.metadata.status
+        if metadata_status != ComponentStatus.SUCCESS:
+            return False
+            
+        # Check if basic metadata exists
+        if not literature.metadata or not literature.metadata.title:
+            return False
+            
+        # Check if at least one identifier exists
+        if not literature.identifiers or (
+            not literature.identifiers.doi and 
+            not literature.identifiers.arxiv_id and
+            not literature.identifiers.pmid
+        ):
+            return False
+            
+        return True
+        
+    except (AttributeError, TypeError) as e:
+        logger.warning(f"Error checking literature parse status: {e}")
+        return False
 
 
 @router.post(
@@ -63,17 +108,26 @@ async def resolve_literature(
         existing_lid = await alias_dao.resolve_to_lid(effective_values)
         
         if existing_lid:
-            # Literature already exists, return immediately with 200 OK
-            logger.info(f"Literature resolved immediately: LID={existing_lid}")
-            return JSONResponse(
-                status_code=status.HTTP_200_OK,
-                content={
-                    "message": "Literature already exists in system.",
-                    "lid": existing_lid,
-                    "resource_url": f"/api/literatures/{existing_lid}",  # New 0.2 API path
-                    "status": "resolved"
-                },
-            )
+            # Check if the literature is successfully parsed before returning it
+            literature_dao = LiteratureDAO()
+            literature = await literature_dao.find_by_lid(existing_lid)
+            
+            if literature and _is_literature_successfully_parsed(literature):
+                # Literature exists and is successfully parsed
+                logger.info(f"Literature resolved immediately: LID={existing_lid}")
+                return JSONResponse(
+                    status_code=status.HTTP_200_OK,
+                    content={
+                        "message": "Literature already exists in system.",
+                        "lid": existing_lid,
+                        "resource_url": f"/api/literatures/{existing_lid}",  # New 0.2 API path
+                        "status": "resolved"
+                    },
+                )
+            else:
+                # Literature exists but not successfully parsed, treat as not found
+                logger.info(f"Literature {existing_lid} exists but not successfully parsed, creating new task")
+                # Continue to create new task below
 
         # No alias match found, create asynchronous task
         logger.info("Literature not found, creating resolution task")

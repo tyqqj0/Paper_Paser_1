@@ -323,9 +323,10 @@ class LiteratureDAO(BaseNeo4jDAO):
             return None
 
     async def find_by_title_fuzzy(self, title: str, limit: int = 10) -> List[LiteratureModel]:
-        """Find literature by fuzzy title match."""
+        """Find literature by fuzzy title match using fulltext search on metadata."""
         try:
             async with self._get_session() as session:
+                # Try fulltext search first (best performance)
                 query = """
                 CALL db.index.fulltext.queryNodes("literature_fulltext", $title)
                 YIELD node, score
@@ -341,6 +342,26 @@ class LiteratureDAO(BaseNeo4jDAO):
                     literature = self._neo4j_node_to_literature_model(record["node"])
                     if literature:
                         results.append(literature)
+                
+                # If fulltext search returns no results, fallback to keyword search
+                if not results:
+                    title_words = title.lower().split()
+                    if title_words:
+                        query = """
+                        MATCH (n:Literature)
+                        WHERE n.metadata IS NOT NULL
+                        WITH n, toLower(n.metadata) as metadata_lower
+                        WHERE """ + " AND ".join([f"metadata_lower CONTAINS '{word}'" for word in title_words]) + """
+                        RETURN n
+                        LIMIT $limit
+                        """
+                        
+                        result = await session.run(query, limit=limit)
+                        
+                        async for record in result:
+                            literature = self._neo4j_node_to_literature_model(record["n"])
+                            if literature:
+                                results.append(literature)
                 
                 return results
                 
@@ -379,6 +400,20 @@ class LiteratureDAO(BaseNeo4jDAO):
         """Finalize literature with complete data."""
         try:
             async with self._get_session() as session:
+                # 🔧 关键修复：检查LID是否已存在，防止意外覆盖
+                existing_check = await session.run(
+                    "MATCH (lit:Literature {lid: $lid}) WHERE lit.lid <> $placeholder_lid RETURN lit.lid as existing_lid",
+                    lid=literature.lid, placeholder_lid=literature_id
+                )
+                existing_record = await existing_check.single()
+                
+                if existing_record:
+                    # LID已存在于另一个记录中，这是不应该发生的
+                    logger.error(f"🚨 LID冲突检测: {literature.lid} 已存在于另一条记录中，拒绝覆盖")
+                    logger.error(f"🚨 尝试最终化: {literature_id} -> {literature.lid}")
+                    logger.error(f"🚨 已存在记录: {existing_record['existing_lid']}")
+                    raise ValueError(f"LID冲突: {literature.lid} already exists in another record")
+                
                 node_props = {
                     "lid": literature.lid,
                     "user_id": str(literature.user_id) if literature.user_id else None,
@@ -409,12 +444,12 @@ class LiteratureDAO(BaseNeo4jDAO):
                 record = await result.single()
                 
                 if record:
-                    logger.info(f"Finalized literature: {literature_id} -> {literature.lid}")
+                    logger.info(f"✅ Finalized literature: {literature_id} -> {literature.lid}")
                 else:
-                    logger.warning(f"Failed to finalize literature {literature_id} -> {literature.lid}")
+                    logger.warning(f"❌ Failed to finalize literature {literature_id} -> {literature.lid}")
                     
         except Exception as e:
-            logger.error(f"Failed to finalize literature {literature_id}: {e}")
+            logger.error(f"❌ Failed to finalize literature {literature_id}: {e}")
             raise
     
     # ========== Helper Methods ==========
